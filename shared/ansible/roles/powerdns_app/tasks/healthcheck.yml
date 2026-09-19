@@ -1,0 +1,67 @@
+---
+- name: Wait for PowerDNS API
+  ansible.builtin.uri:
+    url: "{{ powerdns_healthcheck_url }}"
+    method: GET
+    headers:
+      X-API-Key: "{{ powerdns_api_key }}"
+    status_code: 200
+    validate_certs: false
+  register: powerdns_healthcheck
+  until: powerdns_healthcheck.status == 200
+  retries: 20
+  delay: 6
+
+- name: Verify PowerDNS authoritative Prometheus metrics endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ powerdns_api_port }}/metrics"
+    method: GET
+    status_code: 200
+    validate_certs: false
+
+- name: Verify PowerDNS Recursor Prometheus metrics endpoint
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - --max-time
+      - "10"
+      - --output
+      - /dev/null
+      - "http://127.0.0.1:{{ powerdns_recursor_metrics_port }}/metrics"
+  register: powerdns_recursor_metrics_healthcheck
+  changed_when: false
+  until: powerdns_recursor_metrics_healthcheck.rc == 0
+  retries: 20
+  delay: 6
+
+- name: Verify dnsdist DNS listener
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ powerdns_dnsdist_dns_port }}"
+    state: started
+    timeout: 30
+
+- name: Mark healthy PowerDNS replica as eligible for canonical DNS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../../../shared/scripts/reconcile_service_dns.py"
+      - mark-eligible
+      - --config
+      - "{{ playbook_dir }}/../config.yaml"
+      - --hostname
+      - "{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  environment:
+    NETBOX_API: "{{ lookup('env', 'NETBOX_API') }}"
+    NETBOX_TOKEN: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+    NETBOX_VALIDATE_CERTS: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') }}"
+  register: powerdns_dns_eligibility
+  changed_when: powerdns_dns_eligibility.rc == 0
+  until: powerdns_dns_eligibility.rc == 0
+  retries: 5
+  delay: 10

@@ -1,0 +1,37 @@
+---
+- name: Install Docker Hub cache prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Configure Docker Hub cache
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Run Docker Hub cache Compose lifecycle
+  ansible.builtin.import_role:
+    name: compose_app
+  vars:
+    compose_app_name: dockerhub
+    compose_app_root: "{{ dockerhub_compose_dir }}"
+    compose_app_healthcheck_url: "{{ dockerhub_healthcheck_url }}"
+    compose_app_healthcheck_retries: 30
+    compose_app_healthcheck_delay: 2
+
+- name: Verify Docker Registry Prometheus metrics endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ dockerhub_metrics_port }}/metrics"
+    return_content: false
+    status_code: 200
+
+- name: Restart Docker Hub cache explicitly
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: restart.yml
+  vars:
+    compose_app_root: "{{ dockerhub_compose_dir }}"
+  tags:
+    - never
+    - restart

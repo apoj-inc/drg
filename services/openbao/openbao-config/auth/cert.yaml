@@ -1,0 +1,23 @@
+---
+mount: cert
+type: cert
+description: FreeIPA host certificate bootstrap authentication.
+ca_cert_file: ../../freeipa/pki/trust/freeipa-ca.crt
+roles:
+  - name: ipa-host-bootstrap
+    display_name: ipa-host-bootstrap
+    policies: [ipa-host-bootstrap]
+    token_ttl: 15m
+    token_max_ttl: 30m
+    ocsp_enabled: false
+    ocsp_fail_open: false
+  - name: woodpecker-config-extension
+    display_name: woodpecker-config-extension
+    policies: [ci]
+    token_ttl: 1h
+    token_max_ttl: 2h
+    ocsp_enabled: false
+    ocsp_fail_open: false
+    allowed_dns_sans:
+      - woodpecker-node-a.example.test
+      - woodpecker-node-b.example.test

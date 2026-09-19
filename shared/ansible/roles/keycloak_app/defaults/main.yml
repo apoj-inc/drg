@@ -1,0 +1,89 @@
+---
+keycloak_compose_dir: /opt/keycloak
+keycloak_image_tag: 26.7.0
+keycloak_image: "quay.io/keycloak/keycloak:{{ keycloak_image_tag }}"
+keycloak_listen_address: "0.0.0.0"
+keycloak_http_port: 8080
+keycloak_hostname: https://keycloak.example.test
+keycloak_realm: drg
+keycloak_display_name: DRG
+keycloak_admin_username: admin
+keycloak_admin_password: ""
+keycloak_postgresql_host: postgresql.example.test
+keycloak_postgresql_port: 5432
+keycloak_postgresql_database: keycloak
+keycloak_postgresql_username: keycloak
+keycloak_postgresql_password: ""
+keycloak_postgresql_url_properties: "?targetServerType=any"
+keycloak_proxy_headers: xforwarded
+keycloak_proxy_trusted_addresses: 198.51.100.0/24,192.0.2.0/24,198.51.100.0/24
+keycloak_x509_proxy_provider_enabled: true
+keycloak_x509_proxy_provider: traefik
+keycloak_x509_certificate_chain_length: 10
+keycloak_freeipa_enabled: true
+keycloak_freeipa_connection_url: ldaps://freeipa-a.example.test:636 ldaps://freeipa-b.example.test:636
+keycloak_freeipa_ca_url: ""
+keycloak_freeipa_ca_path: "{{ keycloak_compose_dir }}/certs/freeipa-ca.crt"
+keycloak_freeipa_users_dn: cn=users,cn=accounts,dc=example,dc=test
+keycloak_freeipa_groups_dn: cn=groups,cn=accounts,dc=example,dc=test
+keycloak_freeipa_bind_dn: uid=keycloak-bind,cn=users,cn=accounts,dc=example,dc=test
+keycloak_freeipa_bind_password: ""
+keycloak_freeipa_username_ldap_attribute: uid
+keycloak_freeipa_rdn_ldap_attribute: uid
+keycloak_freeipa_uuid_ldap_attribute: ipaUniqueID
+keycloak_freeipa_user_object_classes: inetOrgPerson, organizationalPerson
+keycloak_freeipa_edit_mode: READ_ONLY
+keycloak_freeipa_import_users: true
+keycloak_freeipa_full_sync: false
+keycloak_freeipa_master_admins_enabled: false
+keycloak_freeipa_master_admins_provider_name: freeipa-master-admin
+keycloak_freeipa_master_admins_ldap_group: admins
+keycloak_freeipa_master_admins_keycloak_group_parent: freeipa
+keycloak_freeipa_federation_reconciliation_enabled: false
+keycloak_freeipa_remove_unmanaged_federations: false
+keycloak_freeipa_managed_application_federation_names:
+  - freeipa
+keycloak_freeipa_managed_master_federation_names:
+  - freeipa-master-admin
+keycloak_freeipa_allow_kerberos_authentication: false
+keycloak_freeipa_use_kerberos_for_password_authentication: false
+keycloak_cache: ispn
+keycloak_cache_stack: jdbc-ping
+keycloak_management_port: 9000
+keycloak_cluster_port: 7800
+# Keycloak runs in Docker, while the cluster transport is published on the VM.
+# Advertise the VM address so JGroups peers do not try to connect to a Docker
+# bridge address such as 172.18.x.x.
+keycloak_cluster_external_address: "{{ ansible_host | default(inventory_hostname) }}"
+keycloak_cluster_external_port: 7800
+keycloak_cluster_failure_detection_port: 57800
+keycloak_clients: []
+keycloak_ldap_mappers:
+  - name: username
+    ldap_attribute: uid
+    user_model_attribute: username
+    mandatory: true
+  - name: email
+    ldap_attribute: mail
+    user_model_attribute: email
+    mandatory: false
+  - name: first name
+    ldap_attribute: givenName
+    user_model_attribute: firstName
+    mandatory: false
+  - name: last name
+    ldap_attribute: sn
+    user_model_attribute: lastName
+    mandatory: false
+keycloak_admin_api_url: "http://127.0.0.1:{{ keycloak_http_port }}"
+keycloak_oauth2_proxy_client_secret: ""
+keycloak_gitlab_client_secret: ""
+keycloak_netbox_client_secret: ""
+keycloak_openbao_client_secret: ""
+# The first rollout contour bootstraps the cluster and therefore cannot pass
+# /health/ready until the next contour joins. Traefik still uses /health/ready
+# and will not route traffic to an incomplete cluster.
+keycloak_rollout_contour: "{{ lookup('env', 'DEPLOYMENT_CONTOUR') | default('', true) }}"
+keycloak_healthcheck_path: >-
+  {{ 'health/live' if keycloak_rollout_contour | upper == 'A' else 'health/ready' }}
+keycloak_healthcheck_url: "http://127.0.0.1:{{ keycloak_management_port }}/{{ keycloak_healthcheck_path }}"

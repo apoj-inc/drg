@@ -1,0 +1,42 @@
+---
+- name: Ensure FreeIPA IaC directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ freeipa_iac_root }}"
+    - "{{ freeipa_iac_profiles_dir }}"
+    - "{{ freeipa_iac_identity_dir }}"
+    - "{{ freeipa_iac_backup_dir }}"
+
+- name: Import repository-owned Dogtag profiles
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      printf '%s\n' "$IPA_ADMIN_PASSWORD" | kinit admin
+      if ipa certprofile-show "{{ item | basename | regex_replace('\.cfg$', '') }}" >/dev/null 2>&1; then
+        kdestroy || true
+        exit 0
+      fi
+      ipa certprofile-import "{{ item | basename | regex_replace('\.cfg$', '') }}" \
+        --file="{{ item }}" --store=true
+      kdestroy || true
+    executable: /bin/bash
+  environment:
+    IPA_ADMIN_PASSWORD: "{{ freeipa_admin_password }}"
+  loop: "{{ lookup('fileglob', playbook_dir ~ '/../pki/profiles/*.cfg', wantlist=True) }}"
+  register: freeipa_profile_import
+  changed_when: freeipa_profile_import.rc == 0 and freeipa_profile_import.stdout | length > 0
+  failed_when: freeipa_profile_import.rc != 0
+  no_log: true
+  when: lookup('fileglob', playbook_dir ~ '/../pki/profiles/*.cfg', wantlist=True) | length > 0
+
+- name: Apply repository-owned FreeIPA identity declarations on primary
+  ansible.builtin.include_tasks: identity.yml
+  loop: "{{ freeipa_iac_identity_files }}"
+  loop_control:
+    loop_var: freeipa_identity_file
+  when: freeipa_is_primary | bool

@@ -1,0 +1,8 @@
+---
+hbac_rules:
+  - name: ansible-ci-managed-linux
+    state: present
+    description: Permit CI automation to connect only to managed Linux hosts
+    user: [ansible-ci]
+    hostgroup: [managed-linux]
+    service: [sshd]

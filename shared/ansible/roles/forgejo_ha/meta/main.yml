@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: drg
+  description: Prepare a two-node active-passive Forgejo DRBD cluster.
+  license: MIT
+  min_ansible_version: "2.15"
+dependencies: []

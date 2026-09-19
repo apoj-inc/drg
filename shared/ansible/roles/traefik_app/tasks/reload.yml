@@ -1,0 +1,9 @@
+---
+- name: Reload Traefik file-provider configuration
+  ansible.builtin.command: docker compose exec -T traefik traefik healthcheck --ping
+  args:
+    chdir: "{{ traefik_compose_dir }}"
+  changed_when: false
+  tags:
+    - never
+    - reload

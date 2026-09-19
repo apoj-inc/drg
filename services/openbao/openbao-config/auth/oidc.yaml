@@ -1,0 +1,74 @@
+---
+providers:
+  - name: keycloak
+    mount: oidc-keycloak
+    type: oidc
+    description: Keycloak OpenID Connect authentication.
+    config:
+      oidc_discovery_url: https://keycloak.example.test/realms/drg
+      oidc_client_id: openbao
+      oidc_client_secret_env: KEYCLOAK_OPENBAO_CLIENT_SECRET
+      default_role: user
+    roles:
+      - name: user
+        role_type: oidc
+        user_claim: preferred_username
+        groups_claim: groups
+        token_policies: [user]
+        oidc_scopes: [openid, profile, email, groups]
+        allowed_redirect_uris:
+          - https://openbao.example.test/ui/vault/auth/oidc-keycloak/oidc/callback
+          - https://openbao.example.test/v1/auth/oidc-keycloak/oidc/callback
+          - http://localhost:8250/oidc/callback
+        bound_claims_type: string
+        bound_claims:
+          groups: openbao-user
+      - name: admin
+        role_type: oidc
+        user_claim: preferred_username
+        groups_claim: groups
+        token_policies: [admin]
+        oidc_scopes: [openid, profile, email, groups]
+        allowed_redirect_uris:
+          - https://openbao.example.test/ui/vault/auth/oidc-keycloak/oidc/callback
+          - https://openbao.example.test/v1/auth/oidc-keycloak/oidc/callback
+          - http://localhost:8250/oidc/callback
+        bound_claims_type: string
+        bound_claims:
+          groups: openbao-admin
+  - name: authentik
+    mount: oidc-authentik
+    type: oidc
+    description: Authentik OpenID Connect authentication.
+    config:
+      oidc_discovery_url: https://auth.example.test/application/o/openbao/
+      oidc_client_id: openbao
+      oidc_client_secret_env: OPENBAO_OIDC_CLIENT_SECRET
+      default_role: user
+    roles:
+      - name: user
+        role_type: oidc
+        user_claim: name
+        groups_claim: groups
+        token_policies: [user]
+        oidc_scopes: [openid, profile, email, groups]
+        allowed_redirect_uris:
+          - https://openbao.example.test/ui/vault/auth/oidc-authentik/oidc/callback
+          - https://openbao.example.test/v1/auth/oidc-authentik/oidc/callback
+          - http://localhost:8250/oidc/callback
+        bound_claims_type: string
+        bound_claims:
+          groups: openbao-user
+      - name: admin
+        role_type: oidc
+        user_claim: name
+        groups_claim: groups
+        token_policies: [admin]
+        oidc_scopes: [openid, profile, email, groups]
+        allowed_redirect_uris:
+          - https://openbao.example.test/ui/vault/auth/oidc-authentik/oidc/callback
+          - https://openbao.example.test/v1/auth/oidc-authentik/oidc/callback
+          - http://localhost:8250/oidc/callback
+        bound_claims_type: string
+        bound_claims:
+          groups: openbao-admin

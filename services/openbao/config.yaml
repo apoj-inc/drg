@@ -1,0 +1,85 @@
+---
+service:
+  name: openbao
+  topology: replicated
+  description: OpenBao secrets-management service.
+  tags: [opentofu, openbao, traefik-managed-route]
+
+startup:
+  order: 70
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+
+rollout:
+  by_contour: true
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1007
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+    keyctl: false
+    fuse: false
+
+compute:
+  cpu_cores: 2
+  memory_mb: 2048
+  swap_mb: 512
+  disk_gb: 20
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: app
+      dns_name_pattern: openbao-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: openbao.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+openbao:
+  image_tag: 2.6.0
+  listen_address: 0.0.0.0
+  http_port: 8200
+  mtls_port: 8202
+  mtls_hostname: openbao-example-cluster-a-01.example.test
+  api_addr: https://openbao.example.test
+  postgresql:
+    host: postgresql.example.test
+    port: 5432
+    database: openbao
+    username: openbao
+    sslmode: disable
+    table: openbao_kv_store
+    ha_enabled: true
+
+secrets:
+  path: kv/services/openbao
+  fields:
+    - openbao_postgresql_password
+    - openbao_oidc_client_secret
+    - openbao_config_token
+    - keycloak_openbao_client_secret
+
+freeipa_client:
+  hostgroups: [service-openbao]

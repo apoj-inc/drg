@@ -1,0 +1,21 @@
+---
+woodpecker_agent_version: "3.18.0"
+woodpecker_agent_server: ci.example.test:9000
+woodpecker_agent_api_url: https://ci.example.test
+woodpecker_agent_api_token: ""
+woodpecker_agent_organization: ""
+woodpecker_agent_name: ""
+woodpecker_agent_rollout_contours: []
+woodpecker_agent_grpc_secure: false
+woodpecker_agent_secret: ""
+woodpecker_agent_secret_file: /etc/woodpecker/agent-secret
+woodpecker_agent_dagger_version: "0.21.0"
+woodpecker_agent_plugin_git_version: "2.10.0"
+woodpecker_agent_plugin_git_binary: /usr/local/bin/plugin-git
+woodpecker_agent_max_workflows: 4
+woodpecker_agent_user: woodpecker
+woodpecker_agent_group: woodpecker
+woodpecker_agent_binary: /usr/local/bin/woodpecker-agent
+woodpecker_agent_env_file: /etc/woodpecker/woodpecker-agent.env
+woodpecker_agent_state_dir: /var/lib/woodpecker-agent
+woodpecker_agent_contour: A

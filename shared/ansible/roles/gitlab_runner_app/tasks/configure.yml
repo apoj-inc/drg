@@ -1,0 +1,180 @@
+---
+- name: Validate GitLab Runner registration settings
+  ansible.builtin.assert:
+    that:
+      - (gitlab_external_url | default('') | string | length) > 0
+      - (gitlab_runner_registration_delegate_host | default('') | string | length) > 0
+      - (gitlab_runner_registration_type | default('') | string | length) > 0
+      - (gitlab_runner_executor | default('') | string | length) > 0
+      - (gitlab_runner_run_untagged | default(false) | bool) or (gitlab_runner_tags | default([]) | length) > 0
+    fail_msg: >-
+      GitLab Runner registration requires gitlab_external_url,
+      gitlab_runner_registration_delegate_host, gitlab_runner_registration_type,
+      gitlab_runner_executor, and at least one GitLab job tag unless
+      gitlab_runner_run_untagged is enabled.
+
+- name: Check existing GitLab Runner configuration
+  ansible.builtin.stat:
+    path: "{{ gitlab_runner_config_path }}"
+  register: gitlab_runner_config_stat
+
+- name: Read existing GitLab Runner configuration
+  ansible.builtin.slurp:
+    path: "{{ gitlab_runner_config_path }}"
+  register: gitlab_runner_config_file
+  when: gitlab_runner_config_stat.stat.exists
+  no_log: true
+
+- name: Set existing GitLab Runner configuration content
+  ansible.builtin.set_fact:
+    gitlab_runner_config_content: "{{ ((gitlab_runner_config_file | default({})).content | default('')) | b64decode }}"
+  no_log: true
+
+- name: Detect existing GitLab Runner registration
+  ansible.builtin.set_fact:
+    gitlab_runner_registered: >-
+      {{
+        gitlab_runner_config_content is search('(?ms)^\[\[runners\]\].*?^\s*token\s*=\s*"[^"\s]+"')
+      }}
+  no_log: true
+
+- name: Create GitLab Runner authentication token on GitLab host
+  ansible.builtin.command:
+    argv:
+      - gitlab-rails
+      - runner
+      - |
+        description = ENV.fetch('RUNNER_DESCRIPTION')
+        runner_type = ENV.fetch('RUNNER_TYPE')
+        user = User.admins.order(:id).first
+        raise 'No GitLab admin user exists for runner creation' unless user
+
+        runner = Ci::Runner
+          .where(runner_type: runner_type, description: description, registration_type: :authenticated_user)
+          .order(id: :desc)
+          .find { |candidate| candidate.registration_available? }
+
+        unless runner
+          response = Ci::Runners::CreateRunnerService
+          .new(
+            user: user,
+            params: {
+              runner_type: runner_type,
+              description: description,
+              run_untagged: ENV.fetch('RUNNER_RUN_UNTAGGED') == 'true',
+              tag_list: ENV.fetch('RUNNER_TAG_LIST').split(',').reject(&:empty?)
+            }
+          )
+            .execute
+          raise Array(response.message).join(', ') unless response.success?
+          runner = response.payload.fetch(:runner)
+        end
+
+        puts runner.token
+  delegate_to: "{{ gitlab_runner_registration_delegate_host }}"
+  vars:
+    ansible_user: root
+    ansible_password: ""
+    ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_FALLBACK_PRIVATE_KEY_FILE') }}"
+    ansible_ssh_common_args: >-
+      -o StrictHostKeyChecking=accept-new -o GSSAPIAuthentication=no
+      -o PreferredAuthentications=publickey -o PubkeyAuthentication=yes
+      -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no
+  environment:
+    RUNNER_DESCRIPTION: "{{ gitlab_runner_description }}"
+    RUNNER_TYPE: "{{ gitlab_runner_registration_type }}"
+    RUNNER_RUN_UNTAGGED: "{{ gitlab_runner_run_untagged | default(false) | bool | ternary('true', 'false') }}"
+    RUNNER_TAG_LIST: "{{ gitlab_runner_tags | join(',') }}"
+  register: gitlab_runner_created_token
+  failed_when: false
+  when:
+    - not gitlab_runner_registered
+    - (gitlab_runner_token | default('') | string | length) == 0
+  no_log: true
+
+- name: Report GitLab Runner token creation failure
+  ansible.builtin.fail:
+    msg: >-
+      GitLab Runner token creation failed: {{ gitlab_runner_created_token.stderr
+      | default(gitlab_runner_created_token.stdout | default('no error output'), true) }}
+  when:
+    - gitlab_runner_created_token is defined
+    - not (gitlab_runner_created_token.skipped | default(false))
+    - (gitlab_runner_created_token.rc | default(0)) != 0
+
+- name: Set GitLab Runner registration token
+  ansible.builtin.set_fact:
+    gitlab_runner_effective_token: >-
+      {{
+        ((gitlab_runner_token | default('') | string | length) > 0)
+        | ternary(gitlab_runner_token, ((gitlab_runner_created_token | default({})).stdout_lines | default([]) | last | default('')))
+      }}
+  when: not gitlab_runner_registered
+  no_log: true
+
+- name: Validate GitLab Runner authentication token
+  ansible.builtin.assert:
+    that:
+      - (gitlab_runner_effective_token | default('') | string | length) > 0
+    fail_msg: GitLab Runner authentication token was not provided or created.
+  when: not gitlab_runner_registered
+  no_log: true
+
+- name: Register GitLab Runner with GitLab
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          'gitlab-runner',
+          'register',
+          '--non-interactive',
+          '--url',
+          gitlab_external_url,
+          '--token',
+          gitlab_runner_effective_token,
+          '--executor',
+          gitlab_runner_executor,
+          '--description',
+          gitlab_runner_description
+        ]
+      }}
+  when: not gitlab_runner_registered
+  no_log: true
+
+- name: Configure GitLab Runner concurrency
+  ansible.builtin.lineinfile:
+    path: "{{ gitlab_runner_config_path }}"
+    regexp: '^concurrent\s*='
+    line: "concurrent = {{ gitlab_runner_concurrent }}"
+    insertbefore: BOF
+    owner: root
+    group: root
+    mode: "0600"
+  when: gitlab_runner_registered or (gitlab_runner_effective_token | default('') | string | length) > 0
+
+- name: Enable and start GitLab Runner
+  ansible.builtin.systemd:
+    name: gitlab-runner
+    enabled: true
+    state: started
+
+- name: Verify GitLab Runner health before DNS publication
+  ansible.builtin.command: systemctl is-active --quiet gitlab-runner
+  changed_when: false
+
+- name: Mark healthy GitLab Runner as eligible for canonical DNS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../../../shared/scripts/reconcile_service_dns.py"
+      - mark-eligible
+      - --config
+      - "{{ playbook_dir }}/../config.yaml"
+      - --hostname
+      - "{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  environment:
+    NETBOX_API: "{{ lookup('env', 'NETBOX_API') }}"
+    NETBOX_TOKEN: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+    NETBOX_VALIDATE_CERTS: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') }}"

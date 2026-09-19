@@ -1,0 +1,142 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "up{job=\"dockerhub\"}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Registry up",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "sum(registry_http_in_flight_requests)",
+                    "refId": "A"
+                }
+            ],
+            "title": "In-flight requests",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "sum by(code) (rate(registry_http_requests_total[5m]))",
+                    "legendFormat": "{{code}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Registry RPS and 5xx",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by(le) (rate(registry_http_request_duration_seconds_bucket[5m])))",
+                    "refId": "A"
+                }
+            ],
+            "title": "Registry p95 request latency",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 14
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "sum by(router,code) (rate(traefik_router_requests_total{router=~\".*docker.*\"}[5m]))",
+                    "legendFormat": "{{router}} {{code}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik requests by route/code",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by(le,router) (rate(traefik_router_request_duration_seconds_bucket{router=~\".*docker.*\"}[5m])))",
+                    "legendFormat": "{{router}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik p95 latency",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "dockerhub",
+        "registry",
+        "traefik"
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "title": "Docker Registry",
+    "uid": "docker-registry",
+    "version": 1
+}

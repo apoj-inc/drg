@@ -1,0 +1,43 @@
+---
+- name: Deploy OpenBao
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('openbao', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    openbao_image_tag: "{{ openbao.image_tag }}"
+    openbao_listen_address: "{{ openbao.listen_address }}"
+    openbao_http_port: "{{ openbao.http_port }}"
+    openbao_mtls_port: "{{ openbao.mtls_port }}"
+    openbao_mtls_hostname: "{{ openbao.mtls_hostname }}"
+    openbao_api_addr: "{{ openbao.api_addr }}"
+    openbao_postgresql_host: "{{ openbao.postgresql.host }}"
+    openbao_postgresql_port: "{{ openbao.postgresql.port }}"
+    openbao_postgresql_database: "{{ openbao.postgresql.database }}"
+    openbao_postgresql_username: "{{ openbao.postgresql.username }}"
+    openbao_postgresql_sslmode: "{{ openbao.postgresql.sslmode }}"
+    openbao_postgresql_table: "{{ openbao.postgresql.table }}"
+    openbao_postgresql_ha_enabled: "{{ openbao.postgresql.ha_enabled }}"
+    openbao_postgresql_password: "{{ lookup('env', 'OPENBAO_POSTGRESQL_PASSWORD') }}"
+    openbao_root_token: "{{ lookup('env', 'OPENBAO_ROOT_TOKEN') }}"
+    openbao_config_bootstrap: "{{ lookup('env', 'OPENBAO_CONFIG_BOOTSTRAP') | default(false, true) }}"
+    openbao_config_token: >-
+      {{ (openbao_root_token if (openbao_config_bootstrap | bool) else lookup('env', 'OPENBAO_CONFIG_TOKEN'))
+         | default('', true) }}
+    openbao_config_directory: "{{ playbook_dir }}/../openbao-config"
+    openbao_config_apply: "{{ lookup('env', 'OPENBAO_CONFIG_APPLY') | default(true, true) }}"
+    # Forgejo must be online before OpenBao can validate its Actions OIDC
+    # discovery endpoint. That definition is reconciled from forgejo.yml.
+    openbao_declarative_auth_exclude_files:
+      - forgejo-actions.yaml
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - openbao_app
+    - monitoring_agent
+    - logging_agent

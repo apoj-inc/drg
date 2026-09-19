@@ -1,0 +1,4 @@
+---
+- name: Restart GitLab Runner
+  ansible.builtin.command: systemctl restart gitlab-runner
+  changed_when: true

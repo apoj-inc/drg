@@ -1,0 +1,14 @@
+---
+labels:
+  opentofu: "true"
+
+steps:
+  - name: validate
+    image: /bin/bash
+    commands:
+      - dagger -m ci/dagger call validate --source=. --commit-sha="$CI_COMMIT_SHA" --repository="$CI_REPO" --pipeline-files="$CI_PIPELINE_FILES" --deploy-environment=production
+    when:
+      - event: pull_request
+      - event: push
+        branch: drunk
+      - event: manual

@@ -1,0 +1,46 @@
+global_defs {
+  router_id {{ inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_') }}
+  enable_script_security
+  script_user root
+}
+
+vrrp_script {{ keepalived_vrrp_script_name }} {
+  script "{{ keepalived_check_script_path }}"
+  interval {{ keepalived_healthcheck_interval }}
+  timeout {{ keepalived_healthcheck_timeout }}
+  fall {{ keepalived_healthcheck_fall }}
+  rise {{ keepalived_healthcheck_rise }}
+  weight {{ keepalived_healthcheck_weight }}
+}
+
+vrrp_instance {{ keepalived_vrrp_instance_name }} {
+  state BACKUP
+  interface {{ keepalived_interface }}
+  virtual_router_id {{ keepalived_virtual_router_id }}
+  priority {{ keepalived_priority }}
+  advert_int {{ keepalived_advert_interval }}
+  {% set peers = [] %}
+  {% for peer in groups[keepalived_peer_group] | default([]) %}
+  {% if peer != inventory_hostname and hostvars[peer][keepalived_local_address_fact] is defined %}
+  {% set _ = peers.append(hostvars[peer][keepalived_local_address_fact]) %}
+  {% endif %}
+  {% endfor %}
+  {% if peers | length > 0 %}
+  {% if hostvars[inventory_hostname][keepalived_local_address_fact] | default('') | length > 0 %}
+  unicast_src_ip {{ hostvars[inventory_hostname][keepalived_local_address_fact] }}
+  {% endif %}
+  unicast_peer {
+  {% for peer_address in peers | unique | sort %}
+    {{ peer_address }}
+  {% endfor %}
+  }
+  {% endif %}
+  virtual_ipaddress {
+    {{ keepalived_virtual_ip }} dev {{ keepalived_interface }}
+  }
+  track_script {
+    {{ keepalived_vrrp_script_name }}
+  }
+  garp_master_delay 1
+  garp_master_repeat 5
+}

@@ -1,0 +1,11 @@
+---
+- name: Restart Forgejo
+  ansible.builtin.systemd:
+    name: "{{ etcd_ha_controller_unit }}"
+    state: restarted
+    daemon_reload: true
+  when: etcd_ha_managed_by_controller | default(false) | bool
+
+- name: Restart Forgejo directly
+  ansible.builtin.include_tasks: ../tasks/restart.yml
+  when: not (etcd_ha_managed_by_controller | default(false) | bool)

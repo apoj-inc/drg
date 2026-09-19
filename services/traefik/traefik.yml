@@ -1,0 +1,16 @@
+---
+http:
+  - name: traefik-dashboard
+    host: "{{ traefik_dashboard_host }}"
+    service: api@internal
+    middlewares:
+      - secured-chain
+      - secure-headers
+
+  - name: traefik-dashboard-keycloak
+    host: "{{ traefik_keycloak_dashboard_host }}"
+    service: api@internal
+    auth_provider: keycloak
+    middlewares:
+      - secured-chain
+      - secure-headers

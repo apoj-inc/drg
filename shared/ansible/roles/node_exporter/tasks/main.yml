@@ -1,0 +1,23 @@
+---
+- name: Install node exporter
+  ansible.builtin.apt:
+    name: "{{ node_exporter_package }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Restrict node exporter to required collectors and listener
+  ansible.builtin.copy:
+    dest: /etc/default/prometheus-node-exporter
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      ARGS="--web.listen-address={{ node_exporter_listen_address }} --collector.disable-defaults --collector.{{ node_exporter_collectors | replace(',', ' --collector.') }}"
+  notify: Restart node exporter
+
+- name: Enable node exporter
+  ansible.builtin.service:
+    name: prometheus-node-exporter
+    enabled: true
+    state: started

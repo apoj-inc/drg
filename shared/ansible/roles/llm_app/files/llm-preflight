@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+env_file=${LLM_ENV_FILE:-/etc/llm/vllm-main.env}
+[[ -r "$env_file" ]] || { echo "ERROR: cannot read $env_file" >&2; exit 2; }
+# The file is rendered root-owned from validated Ansible variables.
+# shellcheck disable=SC1090
+source "$env_file"
+
+expected_count=${LLM_EXPECTED_GPU_COUNT:-4}
+expected_product=${LLM_EXPECTED_GPU_PRODUCT_PATTERN:-NVIDIA GeForce RTX 3080}
+minimum_vram=${LLM_MINIMUM_VRAM_MIB:-9500}
+minimum_disk_gib=${LLM_MINIMUM_FREE_GIB:-30}
+
+for command in nvidia-smi numactl lspci curl awk grep sort uniq df free uname; do
+  command -v "$command" >/dev/null || { echo "ERROR: missing command: $command" >&2; exit 2; }
+done
+
+tmpdir=$(mktemp -d -t llm-preflight.XXXXXX)
+trap 'rm -rf "$tmpdir"' EXIT
+gpu_csv="$tmpdir/gpus.csv"
+nvidia-smi --query-gpu=index,uuid,name,memory.total,pci.bus_id,driver_version \
+  --format=csv,noheader,nounits >"$gpu_csv"
+
+gpu_count=$(wc -l <"$gpu_csv" | tr -d ' ')
+[[ "$gpu_count" -eq "$expected_count" ]] || {
+  echo "ERROR: expected $expected_count GPUs, found $gpu_count" >&2
+  cat "$gpu_csv" >&2
+  exit 1
+}
+
+bad_products=$(awk -F',' -v pattern="$expected_product" '{name=$3; sub(/^[[:space:]]+/, "", name); if (name !~ pattern) print $0}' "$gpu_csv")
+[[ -z "$bad_products" ]] || { echo "ERROR: unexpected GPU product(s):" >&2; echo "$bad_products" >&2; exit 1; }
+
+bad_vram=$(awk -F',' -v minimum="$minimum_vram" '{v=$4; gsub(/[[:space:]]/, "", v); if (v+0 < minimum) print $0}' "$gpu_csv")
+[[ -z "$bad_vram" ]] || { echo "ERROR: GPU below ${minimum_vram} MiB:" >&2; echo "$bad_vram" >&2; exit 1; }
+
+IFS=',' read -r -a selected <<<"${VLLM_DEVICE_IDS:?VLLM_DEVICE_IDS is required}"
+[[ "${#selected[@]}" -eq 4 ]] || { echo "ERROR: exactly four model GPU UUIDs are required" >&2; exit 1; }
+[[ $(printf '%s\n' "${selected[@]}" | sort -u | wc -l) -eq 4 ]] || {
+  echo "ERROR: model GPU UUIDs are not unique" >&2
+  exit 1
+}
+for uuid in "${selected[@]}"; do
+  grep -q ", $uuid," "$gpu_csv" || { echo "ERROR: selected GPU $uuid is absent" >&2; exit 1; }
+done
+
+free_kib=$(df -Pk /srv/llm | awk 'NR==2 {print $4}')
+required_kib=$((minimum_disk_gib * 1024 * 1024))
+[[ "$free_kib" -ge "$required_kib" ]] || {
+  echo "ERROR: /srv/llm needs at least ${minimum_disk_gib} GiB free" >&2
+  exit 1
+}
+
+model_id=${MODEL_ID:?MODEL_ID is required}
+if [[ -d "$model_id" ]]; then
+  # Emergency downloads and other offline deployments use a local snapshot.
+  # Do not require DNS or Hugging Face connectivity when that snapshot exists.
+  [[ -r "$model_id/config.json" ]] || {
+    echo "ERROR: local model metadata is missing: $model_id/config.json" >&2
+    exit 1
+  }
+else
+  model_source_id=${MODEL_SOURCE_ID:-$model_id}
+  config_url="https://huggingface.co/${model_source_id}/resolve/main/config.json"
+  curl --fail --silent --show-error --location --range 0-0 --output /dev/null "$config_url" || {
+    echo "ERROR: model metadata is not reachable: $config_url" >&2
+    echo "For a remote model, configure HTTPS_PROXY/https_proxy; for an offline deployment, set MODEL_ID to a complete local model directory." >&2
+    exit 1
+  }
+fi
+
+echo "=== kernel ==="
+uname -a
+echo "=== memory ==="
+free -h
+echo "=== disk ==="
+df -h /srv/llm
+echo "=== GPUs ==="
+cat "$gpu_csv"
+echo "=== GPU inventory (nvidia-smi -L) ==="
+nvidia-smi -L
+echo "=== GPU details (including PCI) ==="
+nvidia-smi -q
+echo "=== model GPU UUIDs ==="
+printf '%s\n' "${selected[@]}"
+echo "=== NUMA ==="
+numactl -H
+echo "=== PCI tree ==="
+lspci -tv
+echo "=== PCIe link details ==="
+lspci -vv
+echo "=== GPU topology ==="
+nvidia-smi topo -m
+echo "=== P2P status (informational) ==="
+nvidia-smi topo -p2p p || true
+echo "Preflight passed."

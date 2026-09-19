@@ -1,0 +1,5 @@
+---
+auth_mount: cert
+name: ipa-host-bootstrap
+policy: ipa-host-bootstrap
+purpose: FreeIPA host certificate bootstrap. Agent enrollment is not implemented yet.

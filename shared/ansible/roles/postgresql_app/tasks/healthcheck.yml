@@ -1,0 +1,57 @@
+---
+- name: Verify PostgreSQL cluster is ready
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_bin_dir }}/pg_isready"
+      - --host
+      - 127.0.0.1
+      - --port
+      - "{{ postgresql_port | string }}"
+  changed_when: false
+- name: Check local Patroni primary state
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ postgresql_patroni_restapi_port }}/primary"
+    status_code:
+      - 200
+      - 503
+  register: postgresql_health_primary_status
+  failed_when: false
+  changed_when: false
+  when:
+    - postgresql_patroni_enabled | bool
+    - postgresql_pgbouncer_enabled | bool
+- name: Verify primary PgBouncer endpoint is ready
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_bin_dir }}/pg_isready"
+      - --host
+      - 127.0.0.1
+      - --port
+      - "{{ postgresql_pgbouncer_port | string }}"
+  changed_when: false
+  when:
+    - postgresql_patroni_enabled | bool
+    - postgresql_pgbouncer_enabled | bool
+    - postgresql_health_primary_status.status | default(503) == 200
+- name: Verify application databases exist
+  ansible.builtin.command:
+    argv:
+      - psql
+      - --quiet
+      - --no-align
+      - --tuples-only
+      - --command
+      - "SELECT datname FROM pg_database WHERE datname = '{{ item.name }}';"
+  changed_when: false
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: postgresql_health_databases
+  failed_when: postgresql_health_databases.stdout | trim != item.name
+  no_log: true
+  environment:
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+  run_once: true

@@ -1,0 +1,17 @@
+---
+- name: Allow Alloy to inspect Docker containers
+  ansible.builtin.user:
+    name: alloy
+    groups:
+      - docker
+    append: true
+  notify: Restart Alloy
+
+- name: Render Docker Alloy module
+  ansible.builtin.template:
+    src: docker.alloy.j2
+    dest: "{{ logging_agent_docker_module_path }}"
+    owner: root
+    group: alloy
+    mode: "0640"
+  notify: Restart Alloy

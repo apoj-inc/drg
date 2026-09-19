@@ -1,0 +1,76 @@
+---
+- name: Validate declared OpenBao OIDC client secret
+  ansible.builtin.assert:
+    that:
+      - openbao_oidc_definition.config is mapping
+      - openbao_oidc_definition.config.oidc_discovery_url | string | length > 0
+      - openbao_oidc_definition.config.oidc_client_id | string | length > 0
+      - openbao_oidc_definition.config.oidc_client_secret_env | string | length > 0
+      - lookup('ansible.builtin.env', openbao_oidc_definition.config.oidc_client_secret_env) | string | length > 0
+    fail_msg: >-
+      OIDC provider {{ openbao_oidc_definition.name }} requires a discovery URL,
+      client ID, and a populated client-secret environment variable.
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Enable declared OpenBao OIDC provider
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "sys/auth/{{ openbao_oidc_definition.mount }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      type: oidc
+      description: "{{ openbao_oidc_definition.description }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: "(openbao_oidc_definition.mount ~ '/') not in (openbao_declarative_auth_mounts.data.data | default({}))"
+  no_log: true
+
+- name: Make declared OpenBao OIDC provider visible in the UI
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "sys/auth/{{ openbao_oidc_definition.mount }}/tune"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      listing_visibility: unauth
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Configure declared OpenBao OIDC provider client
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "auth/{{ openbao_oidc_definition.mount }}/config"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      oidc_discovery_url: "{{ openbao_oidc_definition.config.oidc_discovery_url }}"
+      oidc_client_id: "{{ openbao_oidc_definition.config.oidc_client_id }}"
+      oidc_client_secret: "{{ lookup('env', openbao_oidc_definition.config.oidc_client_secret_env) }}"
+      default_role: "{{ openbao_oidc_definition.config.default_role }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Configure declared OpenBao OIDC roles
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "auth/{{ openbao_oidc_definition.mount }}/role/{{ openbao_oidc_role.name }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data: "{{ openbao_oidc_role | dict2items | rejectattr('key', 'equalto', 'name') | items2dict }}"
+  loop: "{{ openbao_oidc_definition.roles }}"
+  loop_control:
+    loop_var: openbao_oidc_role
+    label: "{{ openbao_oidc_role.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true

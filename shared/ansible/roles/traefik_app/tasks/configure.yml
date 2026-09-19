@@ -1,0 +1,214 @@
+---
+- name: Validate Traefik static host entries
+  ansible.builtin.assert:
+    that:
+      - item.address is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}$')
+      - item.names | length > 0
+      - item.names | select('match', '^[A-Za-z0-9][A-Za-z0-9.-]*$') | list | length == item.names | length
+    fail_msg: Each Traefik static host entry requires an IPv4 address and one or more valid host names.
+  loop: "{{ traefik_host_entries }}"
+  loop_control:
+    label: "{{ item.address }}"
+
+- name: Configure Traefik static host entries
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ item.address | regex_escape }}\\s+.*$"
+    line: "{{ item.address }} {{ item.names | join(' ') }}"
+    state: present
+  loop: "{{ traefik_host_entries }}"
+  loop_control:
+    label: "{{ item.address }}"
+
+- name: Discover service Traefik route definitions
+  ansible.builtin.find:
+    paths:
+      - "{{ playbook_dir | dirname | dirname | dirname }}"
+    patterns:
+      - traefik.yml
+      - traefik.yml.j2
+      - external-services.yml
+    file_type: file
+    recurse: true
+  register: traefik_route_discovery
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Store discovered service Traefik route definitions
+  ansible.builtin.set_fact:
+    traefik_route_files: >-
+      {{ traefik_route_discovery.files |
+         map(attribute='path') |
+         reject('search', '[\\/]ansible[\\/]') |
+         reject('search', '[\\/]host_vars[\\/]') |
+         list | unique | sort }}
+
+- name: Render discovered service Traefik route configurations
+  ansible.builtin.template:
+    src: "{{ role_path | dirname }}/traefik_proxy_config/templates/service.yml.j2"
+    dest: >-
+      {{ traefik_compose_dir }}/config/{{
+        traefik_route_file_item |
+        regex_replace('.*/([^/]+)/[^/]+$', '\\1.yml')
+      }}
+    mode: "0644"
+  vars:
+    traefik_route_static_discovery: true
+    traefik_route_config: >-
+      {{ lookup(
+           'template',
+           traefik_route_file_item,
+           template_vars=hostvars[traefik_route_template_host]
+         ) | from_yaml }}
+  loop: "{{ traefik_route_files }}"
+  loop_control:
+    loop_var: traefik_route_file_item
+    label: "{{ traefik_route_file_item }}"
+  when:
+    - traefik_route_files | length > 0
+  notify: Restart Traefik
+
+- name: Load service Traefik route definitions
+  ansible.builtin.set_fact:
+    traefik_route_definitions: >-
+      {{ (traefik_route_definitions | default([])) + [
+           (lookup(
+             'template',
+             item,
+             template_vars=hostvars[inventory_hostname]
+           ) | from_yaml)
+         ] }}
+  loop: "{{ traefik_route_files }}"
+  vars:
+    traefik_route_static_discovery: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Initialize managed TCP and UDP entrypoint registry
+  ansible.builtin.set_fact:
+    traefik_managed_entrypoints: []
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Add managed TCP entrypoints
+  ansible.builtin.set_fact:
+    traefik_managed_entrypoints: >-
+      {{ traefik_managed_entrypoints + [{
+        'name': item.1.entrypoint | default(item.1.name),
+        'port': item.1.listen_port | int,
+        'protocol': 'tcp'
+      }] }}
+  loop: "{{ query('subelements', traefik_route_definitions | default([]), 'tcp', {'skip_missing': true}) }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Add Prometheus metrics entrypoint to managed registry
+  ansible.builtin.set_fact:
+    traefik_managed_entrypoints: >-
+      {{ traefik_managed_entrypoints + [{
+        'name': traefik_metrics_entrypoint,
+        'port': traefik_metrics_listen_port | int,
+        'protocol': 'tcp'
+      }] }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: traefik_metrics_enabled | bool
+
+- name: Add managed UDP entrypoints
+  ansible.builtin.set_fact:
+    traefik_managed_entrypoints: >-
+      {{ traefik_managed_entrypoints + [{
+        'name': item.1.entrypoint | default(item.1.name),
+        'port': item.1.listen_port | int,
+        'protocol': 'udp'
+      }] }}
+  loop: "{{ query('subelements', traefik_route_definitions | default([]), 'udp', {'skip_missing': true}) }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Validate managed entrypoint names and ports
+  ansible.builtin.assert:
+    that:
+      - (traefik_managed_entrypoints | map(attribute='name') | list | unique | length) == (traefik_managed_entrypoints | length)
+      - >-
+        {{
+          (
+            traefik_managed_entrypoints |
+            map(attribute='protocol') |
+            zip(traefik_managed_entrypoints | map(attribute='port')) |
+            map('join', ':') |
+            list |
+            unique |
+            length
+          ) == (traefik_managed_entrypoints | length)
+        }}
+      - (traefik_managed_entrypoints | map(attribute='port') | select('>=', 1) | list | length) == (traefik_managed_entrypoints | length)
+      - (traefik_managed_entrypoints | map(attribute='port') | select('<=', 65535) | list | length) == (traefik_managed_entrypoints | length)
+    fail_msg: "TCP/UDP entrypoint names and protocol/listen_port values must be unique and valid."
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Check managed entrypoint ports are free or owned by Traefik
+  ansible.builtin.shell: >-
+    ss -H -ltnup |
+    grep -E ':({{ traefik_managed_entrypoints | map(attribute="port") | join("|") }})([^0-9]|$)' |
+    grep -vE 'traefik|docker-proxy' || true
+  args:
+    executable: /bin/bash
+  register: traefik_port_conflicts
+  changed_when: false
+  failed_when: traefik_port_conflicts.stdout | trim | length > 0
+  when: traefik_managed_entrypoints | length > 0
+
+- name: Load Traefik middleware definitions
+  ansible.builtin.set_fact:
+    traefik_middlewares: >-
+      {{ (lookup('template', traefik_middlewares_file) | from_yaml).http.middlewares | default({}) }}
+  when: traefik_middlewares_file | trim | length > 0
+
+- name: Render Docker Compose project environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ traefik_compose_dir }}/.env"
+    mode: "0600"
+  no_log: true
+  notify: Restart Traefik
+
+- name: Render Traefik static configuration
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: "{{ traefik_compose_dir }}/traefik.yml"
+    mode: "0644"
+  no_log: true
+  notify: Restart Traefik
+
+- name: Render Traefik middlewares file
+  ansible.builtin.template:
+    src: middlewares.yml.j2
+    dest: "{{ traefik_compose_dir }}/config/middlewares.yml"
+    mode: "0644"
+  notify: Restart Traefik
+
+- name: Remove migrated Traefik dynamic route files
+  ansible.builtin.file:
+    path: "{{ traefik_compose_dir }}/config/{{ item }}"
+    state: absent
+  loop:
+    - apps.yml
+    - gitlab-ssh.yml
+    - dashboard.yml
+  notify: Restart Traefik
+
+- name: Render Traefik Docker Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ traefik_compose_dir }}/docker-compose.yml"
+    mode: "0644"
+  notify: Restart Traefik

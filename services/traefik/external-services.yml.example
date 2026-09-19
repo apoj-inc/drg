@@ -1,0 +1,9 @@
+---
+# Example only. Keep production service maps in a private overlay.
+http:
+  - name: example-service
+    host: app.example.test
+    service: example-service
+    backend_url: http://192.0.2.10:8080
+    middlewares:
+      - secure-headers

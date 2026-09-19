@@ -1,0 +1,123 @@
+---
+- name: Install PostgreSQL repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+- name: Ensure APT keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+- name: Download PostgreSQL APT signing key
+  ansible.builtin.command:
+    argv:
+      - curl
+      - -fsSL
+      - https://www.postgresql.org/media/keys/ACCC4CF8.asc
+      - -o
+      - /etc/apt/keyrings/postgresql.asc
+  args:
+    creates: /etc/apt/keyrings/postgresql.asc
+  environment: "{{ external_download_environment }}"
+- name: Ensure PostgreSQL APT signing key permissions
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/postgresql.asc
+    state: file
+    mode: "0644"
+- name: Add PostgreSQL official APT repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/pgdg.sources
+    mode: "0644"
+    content: |
+      Types: deb
+      URIs: https://apt.postgresql.org/pub/repos/apt
+      Suites: {{ ansible_distribution_release }}-pgdg
+      Components: main
+      Signed-By: /etc/apt/keyrings/postgresql.asc
+- name: Ensure PostgreSQL common configuration directory exists
+  ansible.builtin.file:
+    path: /etc/postgresql-common
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: postgresql_patroni_enabled | bool
+- name: Disable automatic PostgreSQL cluster creation for Patroni
+  ansible.builtin.copy:
+    dest: /etc/postgresql-common/createcluster.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      create_main_cluster = false
+  when: postgresql_patroni_enabled | bool
+- name: Install PostgreSQL packages
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgresql_version }}"
+      - "postgresql-client-{{ postgresql_version }}"
+      - "postgresql-contrib-{{ postgresql_version }}"
+    state: present
+    update_cache: true
+- name: Install Patroni and PgBouncer packages
+  ansible.builtin.apt:
+    name:
+      - patroni
+      - pgbouncer
+      - python3-etcd
+      - sudo
+    state: present
+  when: postgresql_patroni_enabled | bool
+- name: Check PostgreSQL cluster configuration
+  ansible.builtin.stat:
+    path: "{{ postgresql_conf_dir }}/postgresql.conf"
+  register: postgresql_cluster_config
+- name: Check whether the PostgreSQL data directory already contains a cluster
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: postgresql_data_directory
+- name: Create PostgreSQL cluster if package installation did not create it
+  ansible.builtin.command:
+    argv:
+      - pg_createcluster
+      - --start
+      - --encoding
+      - "{{ postgresql_encoding }}"
+      - --locale
+      - "{{ postgresql_locale }}"
+      - "{{ postgresql_version }}"
+      - "{{ postgresql_cluster_name }}"
+  when:
+    - not postgresql_patroni_enabled | bool
+    - not postgresql_cluster_config.stat.exists
+    - not postgresql_data_directory.stat.exists
+- name: Ensure PostgreSQL service is enabled and running
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+  when: not postgresql_patroni_enabled | bool
+- name: Check PostgreSQL cluster status
+  ansible.builtin.command:
+    argv:
+      - pg_ctlcluster
+      - "{{ postgresql_version }}"
+      - "{{ postgresql_cluster_name }}"
+      - status
+  register: postgresql_cluster_status
+  changed_when: false
+  failed_when: false
+- name: Start PostgreSQL cluster if it is offline
+  ansible.builtin.command:
+    argv:
+      - pg_ctlcluster
+      - "{{ postgresql_version }}"
+      - "{{ postgresql_cluster_name }}"
+      - start
+  when:
+    - not postgresql_patroni_enabled | bool
+    - postgresql_cluster_status.rc != 0

@@ -1,0 +1,55 @@
+---
+- name: Install FreeIPA prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Validate FreeIPA settings
+  ansible.builtin.assert:
+    that:
+      - freeipa_hostname | string | length > 0
+      - freeipa_ip_address | string | length > 0
+      - freeipa_domain | string | length > 0
+      - freeipa_realm | string | length > 0
+      - freeipa_is_primary | bool or freeipa_replica_source_host | string | length > 0
+      - freeipa_setup_ca | bool
+      - freeipa_admin_password | string | length > 0
+      - freeipa_directory_manager_password | string | length > 0
+    fail_msg: >-
+      FreeIPA requires hostname/domain/realm plus FREEIPA_ADMIN_PASSWORD,
+      FREEIPA_DIRECTORY_MANAGER_PASSWORD. Service-account passwords are
+      supplied according to identity/service_users.yaml.
+  no_log: true
+  tags:
+    - configure
+
+- name: Configure FreeIPA
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Apply repository-owned FreeIPA configuration
+  ansible.builtin.import_tasks: iac.yml
+  tags:
+    - iac
+    - configure
+
+- name: Run FreeIPA acceptance checks
+  ansible.builtin.import_tasks: acceptance.yml
+  tags:
+    - healthcheck
+    - acceptance
+
+- name: Check FreeIPA health
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck
+
+- name: Restart FreeIPA explicitly
+  ansible.builtin.systemd:
+    name: ipa
+    state: restarted
+  tags:
+    - never
+    - restart

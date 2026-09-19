@@ -1,0 +1,6 @@
+---
+go_toolchain_version: "1.26.5"
+go_toolchain_install_dir: "/usr/local/go-{{ go_toolchain_version }}"
+go_toolchain_tarball_url: "https://go.dev/dl/go{{ go_toolchain_version }}.linux-amd64.tar.gz"
+go_toolchain_tarball_dest: "/tmp/go{{ go_toolchain_version }}.linux-amd64.tar.gz"
+go_toolchain_tarball_checksum: ""

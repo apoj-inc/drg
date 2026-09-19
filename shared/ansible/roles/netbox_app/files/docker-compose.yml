@@ -1,0 +1,57 @@
+---
+services:
+  netbox: &netbox
+    image: ${NETBOX_IMAGE}
+    build:
+      context: .
+      args:
+        NETBOX_BASE_IMAGE: ${NETBOX_BASE_IMAGE}
+    restart: unless-stopped
+    env_file:
+      - ./env/netbox.env
+    ports:
+      - "${NETBOX_LISTEN_ADDRESS}:${NETBOX_HTTP_PORT}:8080"
+    volumes:
+      - netbox-media-files:/opt/netbox/netbox/media
+      - netbox-reports-files:/opt/netbox/netbox/reports
+      - netbox-scripts-files:/opt/netbox/netbox/scripts
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/netbox/venv/bin/python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/login/', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  netbox-worker:
+    <<: *netbox
+    depends_on:
+      netbox:
+        condition: service_healthy
+    ports: []
+    command:
+      - /opt/netbox/venv/bin/python
+      - /opt/netbox/netbox/manage.py
+      - rqworker
+    healthcheck:
+      disable: true
+
+  netbox-housekeeping:
+    <<: *netbox
+    restart: "no"
+    depends_on:
+      netbox:
+        condition: service_healthy
+    ports: []
+    command:
+      - /opt/netbox/venv/bin/python
+      - /opt/netbox/netbox/manage.py
+      - housekeeping
+    healthcheck:
+      disable: true
+
+volumes:
+  netbox-media-files:
+  netbox-reports-files:
+  netbox-scripts-files:

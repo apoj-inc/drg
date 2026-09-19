@@ -1,0 +1,31 @@
+services:
+  openbao:
+    image: {{ openbao_image }}
+    container_name: openbao
+    restart: unless-stopped
+    group_add:
+      - "{{ openbao_tls_group_id }}"
+    command:
+      - server
+      - -config=/openbao/config/config.hcl
+    ports:
+      - "{{ openbao_listen_address }}:{{ openbao_http_port }}:{{ openbao_http_port }}"
+      - "{{ openbao_listen_address }}:{{ openbao_mtls_port }}:{{ openbao_mtls_port }}"
+    volumes:
+      - ./config:/openbao/config:ro
+      - ./tls:/openbao/tls:ro
+      - openbao-logs:/openbao/logs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q --spider http://127.0.0.1:{{ openbao_http_port }}/v1/sys/health;
+          status=$$?;
+          test "$$status" -eq 0 -o "$$status" -eq 8
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  openbao-logs:

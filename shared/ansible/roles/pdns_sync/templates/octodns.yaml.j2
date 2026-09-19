@@ -1,0 +1,28 @@
+---
+providers:
+  netbox:
+    class: octodns_netbox_dns.NetBoxDNSProvider
+    url: env/NETBOX_API
+    token: env/NETBOX_TOKEN
+    make_absolute: true
+    insecure_request: {{ (not (pdns_sync_netbox_validate_certs | bool)) | ternary('true', 'false') }}
+    zone_status_filter: active
+    record_status_filter: active
+  powerdns:
+    class: octodns_powerdns.PowerDnsProvider
+    host: {{ pdns_sync_powerdns_host | to_json }}
+    port: {{ pdns_sync_powerdns_port | int }}
+    api_key: env/POWERDNS_API_KEY
+
+processors:
+  ignore-root-ns:
+    class: octodns.processor.filter.IgnoreRootNsFilter
+
+zones:
+  {{ pdns_sync_zone | to_json }}:
+    sources:
+      - netbox
+    processors:
+      - ignore-root-ns
+    targets:
+      - powerdns

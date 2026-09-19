@@ -1,0 +1,4 @@
+---
+# Human users managed by FreeIPA IaC.
+# Service accounts belong in service_users.yaml.
+users: []

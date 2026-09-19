@@ -1,0 +1,31 @@
+---
+- name: Bootstrap Proxmox SDN objects in NetBox
+  hosts: netbox
+  become: true
+  gather_facts: false
+
+  vars:
+    platform_config_file: "{{ playbook_dir }}/../../../environments/example/platform.yaml"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+    - name: Load platform configuration
+      ansible.builtin.include_vars:
+        file: "{{ platform_config_file }}"
+        name: platform_config
+
+    - name: Select the platform cluster
+      ansible.builtin.set_fact:
+        platform_cluster_name: "{{ (platform_config.clusters | dict2items | first).key }}"
+        proxmox_nodes: []
+
+    - name: Build Proxmox node seed from platform configuration
+      ansible.builtin.set_fact:
+        proxmox_nodes: "{{ proxmox_nodes + [item.value | combine({'name': item.key})] }}"
+      loop: "{{ platform_config.clusters[platform_cluster_name].nodes | dict2items }}"
+
+  roles:
+    - role: netbox_sdn_bootstrap
+      vars:
+        netbox_sdn_bootstrap_seed_file: "{{ playbook_dir }}/config/default_sdn.yml"

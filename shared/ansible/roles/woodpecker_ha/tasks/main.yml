@@ -1,0 +1,33 @@
+---
+- name: Record Woodpecker HA ownership state
+  ansible.builtin.set_fact:
+    woodpecker_managed_by_ha: >-
+      {{
+        (etcd_ha_managed_by_controller | default(false) | bool)
+        or (pacemaker_ha_managed_by_cluster | default(false) | bool)
+        or (woodpecker_ha_deferred | default(false) | bool)
+      }}
+    woodpecker_ha_resource_configured: >-
+      {{
+        (etcd_ha_resource_configured | default(false) | bool)
+        or (pacemaker_ha_resource_configured | default(false) | bool)
+      }}
+
+- name: Render Woodpecker HA control command
+  ansible.builtin.template:
+    src: woodpecker-ha-control.sh.j2
+    dest: "{{ woodpecker_ha_control_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Render Woodpecker HA resource setup command
+  ansible.builtin.template:
+    src: woodpecker-ha-resource-setup.sh.j2
+    dest: "{{ woodpecker_ha_resource_setup_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  when:
+    - woodpecker_ha_backend == 'pacemaker'
+    - woodpecker_ha_sync | default(false) | bool

@@ -1,0 +1,21 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+resource "openstack_compute_flavor_v2" "this" {
+  for_each = {
+{% for name, flavor in config.compute_catalog.flavors.items() %}
+    {{ name }} = {
+      vcpus     = {{ flavor.vcpus }}
+      ram_mb    = {{ flavor.ram | size_to_mb }}
+      disk_gb   = {{ flavor.disk | size_to_gb }}
+      is_public = {{ flavor.is_public | default(True) | tf_value }}
+    }
+{% endfor %}
+  }
+
+  name      = each.key
+  vcpus     = each.value.vcpus
+  ram       = each.value.ram_mb
+  disk      = each.value.disk_gb
+  is_public = each.value.is_public
+}

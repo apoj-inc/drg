@@ -1,0 +1,118 @@
+---
+service:
+  name: forgejo
+  topology: etcd-active-passive
+  description: Forgejo active-passive service with etcd ownership and pluggable storage.
+  tags: [opentofu, forgejo, traefik-managed-route]
+
+ha:
+  backend: etcd
+  etcd_endpoints:
+    - http://etcd-node-a.example.test:2379
+    - http://etcd-node-b.example.test:2379
+    - http://etcd-node-c.example.test:2379
+
+startup:
+  order: 150
+
+rollout:
+  by_contour: true
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A: {start: 1300}
+      B: {start: 1301}
+
+compute:
+  cpu_cores: 4
+  memory_mb: 8192
+  disk_gb: 40
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: app
+      dns_name_pattern: forgejo-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: forge.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+storage:
+  ha_backend: drbd
+  drbd:
+    resource: forgejo
+    # Terraform attaches the dedicated Forgejo data disk as Proxmox scsi1.
+    # Use its persistent udev name; /dev/sdb is the OS disk on these guests.
+    backing_device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+    device: /dev/drbd0
+    port: 7789
+    mountpoint: /srv/forgejo-drbd
+    filesystem: ext4
+    data_disk_gb: 120
+
+  # Set ha_backend to shared_filesystem after a RW CephFS/NFS mount is
+  # available on every candidate. DRBD remains the two-node default.
+  shared_filesystem:
+    source: ""
+    fstype: nfs
+    options: "vers=4,hard,_netdev,noatime"
+
+forgejo:
+  image: codeberg.org/forgejo/forgejo
+  image_tag: "16.0.1"
+  http_port: 3000
+  ssh_port: 2223
+  root_url: https://forge.example.test/
+  repository_root: /srv/forgejo-drbd/repositories
+  data_dir: /srv/forgejo-drbd/data
+  postgresql:
+    host: postgresql.example.test
+    port: 5432
+    database: forgejo
+    username: forgejo
+    ssl_mode: disable
+  s3:
+    endpoint: s3.example.test
+    region: us-east-1
+    bucket: forgejo
+    use_ssl: true
+  oidc:
+    enabled: true
+    provider_name: Authentik
+    issuer_url: https://auth.example.test/application/o/forgejo/
+    client_id: forgejo
+  traefik_trusted_proxy: 198.51.100.0/24
+  # Woodpecker resolves to the private ingress address 198.51.100.3.
+  webhook_allowed_host_list: external,private,loopback
+
+secrets:
+  path: kv/services/forgejo
+  fields:
+    - forgejo_postgresql_password
+    - forgejo_secret_key
+    - forgejo_internal_token
+    - forgejo_lfs_jwt_secret
+    - forgejo_oidc_client_secret
+    - forgejo_s3_access_key
+    - forgejo_s3_secret_key
+
+freeipa_client:
+  hostgroups: [service-forgejo]

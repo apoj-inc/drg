@@ -1,0 +1,30 @@
+---
+- name: Deploy Redis HA cluster
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('redis', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    redis_port: "{{ redis.port }}"
+    redis_sentinel_port: "{{ redis.sentinel_port }}"
+    redis_listen_address: "{{ redis.listen_address }}"
+    redis_data_dir: "{{ redis.data_dir }}"
+    redis_sentinel_data_dir: "{{ redis.sentinel_data_dir }}"
+    redis_master_name: "{{ redis.master_name }}"
+    redis_quorum: "{{ redis.quorum }}"
+    redis_down_after_milliseconds: "{{ redis.down_after_milliseconds }}"
+    redis_failover_timeout: "{{ redis.failover_timeout }}"
+    redis_parallel_syncs: "{{ redis.parallel_syncs }}"
+    redis_password: "{{ lookup('env', 'REDIS_PASSWORD') }}"
+    redis_dns_zone: "{{ dns.zone }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - redis_app
+    - monitoring_agent
+    - logging_agent

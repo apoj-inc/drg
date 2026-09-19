@@ -1,0 +1,6 @@
+---
+- name: Restart vLLM main
+  ansible.builtin.systemd:
+    name: vllm-main
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,8 @@
+---
+http:
+  - name: versitygw
+    host: s3.example.test
+    service: versitygw
+    entrypoints: [websecure]
+    backend_port: 7070
+    middlewares: [lan-and-vpn-only, secure-headers]

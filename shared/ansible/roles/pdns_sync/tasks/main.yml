@@ -1,0 +1,144 @@
+---
+- name: Require the A controller in an apply run
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (pdns_sync_apply | bool)
+        or (
+          ansible_play_hosts_all
+          | select(
+              'match',
+              '^powerdns-.+-' ~ (pdns_sync_controller_contour | lower) ~ '-[0-9]+$'
+            )
+          | list
+          | length > 0
+        )
+    fail_msg: >-
+      pdns_sync_apply=true requires a run that includes the PowerDNS contour A
+      controller; do not apply from the B-only rollout job.
+  run_once: true
+  when: pdns_sync_is_controller | bool
+
+- name: Configure octoDNS controller
+  when: pdns_sync_is_controller | bool
+  block:
+    - name: Validate octoDNS settings
+      ansible.builtin.assert:
+        that:
+          - pdns_sync_zone | string | length > 0
+          - pdns_sync_netbox_url | string | length > 0
+          - pdns_sync_netbox_token | string | length > 0
+          - pdns_sync_powerdns_host | string | length > 0
+          - pdns_sync_powerdns_port | int > 0
+          - pdns_sync_powerdns_api_key | string | length > 0
+        fail_msg: >-
+          octoDNS requires NETBOX_API, NETBOX_TOKEN, POWERDNS_API_KEY and a
+          valid PowerDNS API endpoint.
+      no_log: true
+
+    - name: Ensure octoDNS controller directory exists
+      ansible.builtin.file:
+        path: "{{ pdns_sync_compose_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Write pinned octoDNS image definition
+      ansible.builtin.copy:
+        src: Dockerfile
+        dest: "{{ pdns_sync_compose_dir }}/Dockerfile"
+        mode: "0644"
+
+    - name: Write octoDNS Compose file
+      ansible.builtin.copy:
+        src: docker-compose.yml
+        dest: "{{ pdns_sync_compose_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    - name: Write octoDNS configuration
+      ansible.builtin.template:
+        src: octodns.yaml.j2
+        dest: "{{ pdns_sync_compose_dir }}/octodns.yaml"
+        mode: "0600"
+
+    - name: Write octoDNS environment
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ pdns_sync_compose_dir }}/.env"
+        mode: "0600"
+      no_log: true
+
+    - name: Validate octoDNS Compose configuration
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - config
+          - --quiet
+      args:
+        chdir: "{{ pdns_sync_compose_dir }}"
+      changed_when: false
+
+    - name: Build pinned octoDNS image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - build
+          - octodns
+      args:
+        chdir: "{{ pdns_sync_compose_dir }}"
+      changed_when: false
+
+    - name: Generate octoDNS DNS plan
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - run
+          - --rm
+          - octodns
+          - --config-file
+          - /config/octodns.yaml
+      args:
+        chdir: "{{ pdns_sync_compose_dir }}"
+      register: pdns_sync_plan
+      changed_when: false
+
+    - name: Display octoDNS DNS plan
+      ansible.builtin.debug:
+        msg: "{{ pdns_sync_plan.stderr }}"
+      when: pdns_sync_plan.stderr | trim | length > 0
+
+    - name: Apply approved octoDNS DNS plan
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - run
+          - --rm
+          - octodns
+          - --config-file
+          - /config/octodns.yaml
+          - --doit
+      args:
+        chdir: "{{ pdns_sync_compose_dir }}"
+      when: pdns_sync_apply | bool
+      changed_when: true
+
+- name: Check for legacy netbox-pdns deployment
+  ansible.builtin.stat:
+    path: "{{ pdns_sync_legacy_compose_dir }}/docker-compose.yml"
+  register: pdns_sync_legacy_compose
+
+- name: Stop legacy netbox-pdns connector after successful octoDNS apply
+  community.docker.docker_compose_v2:
+    project_src: "{{ pdns_sync_legacy_compose_dir }}"
+    files:
+      - docker-compose.yml
+    state: absent
+    remove_orphans: true
+  when:
+    - pdns_sync_apply | bool
+    - pdns_sync_legacy_compose.stat.exists

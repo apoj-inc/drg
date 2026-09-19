@@ -1,0 +1,12 @@
+---
+- name: Check compose app health endpoint
+  ansible.builtin.uri:
+    url: "{{ compose_app_healthcheck_url }}"
+    status_code: "{{ compose_app_healthcheck_status_code }}"
+    follow_redirects: "{{ compose_app_healthcheck_follow_redirects }}"
+    validate_certs: false
+  register: compose_app_healthcheck_result
+  until: compose_app_healthcheck_result.status in (compose_app_healthcheck_status_code if compose_app_healthcheck_status_code is sequence else [compose_app_healthcheck_status_code | int])
+  retries: "{{ compose_app_healthcheck_retries | int }}"
+  delay: "{{ compose_app_healthcheck_delay | int }}"
+  when: compose_app_healthcheck_url | length > 0

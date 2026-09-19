@@ -1,0 +1,8 @@
+{% if job.openbao and job.openbao.secrets %}
+    VAULT_SERVER_URL: "{{ job.openbao.server_url }}"
+    VAULT_AUTH_PATH: "{{ job.openbao.auth_path }}"
+    VAULT_AUTH_ROLE: "{{ job.openbao.auth_role }}"
+    OPENBAO_ID_TOKEN_NAME: "{{ job.openbao.id_token_name }}"
+    OPENBAO_SECRET_JOB: "{{ openbao_secret_job }}"
+    OPENBAO_SECRET_SPECS: '{{ job.openbao.secrets | tojson }}'
+{% endif %}

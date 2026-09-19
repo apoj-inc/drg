@@ -1,0 +1,8 @@
+---
+- name: Ensure compose app directory exists
+  ansible.builtin.file:
+    path: "{{ compose_app_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

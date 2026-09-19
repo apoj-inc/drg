@@ -1,0 +1,5 @@
+---
+name: ssh-host-signer
+rules:
+  - path: ssh-host/sign/host
+    capabilities: [update]

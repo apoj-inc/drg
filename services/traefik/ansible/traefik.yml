@@ -1,0 +1,71 @@
+---
+- name: Deploy Traefik
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('tags_traefik', true) }}"
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config.yaml
+  vars:
+    traefik_host_entries: "{{ traefik.host_entries | default([]) }}"
+    traefik_metrics_enabled: "{{ traefik.metrics.enabled | default(false) | bool }}"
+    traefik_metrics_entrypoint: "{{ traefik.metrics.entrypoint | default('metrics') }}"
+    traefik_metrics_listen_port: "{{ traefik.metrics.listen_port | default(8082) }}"
+    traefik_middlewares_file: "{{ playbook_dir }}/../middlewares.yml"
+    keepalived_interface: "{{ keepalived.interface }}"
+    keepalived_virtual_ip: "{{ keepalived.virtual_ip }}"
+    keepalived_virtual_router_id: "{{ keepalived.virtual_router_id }}"
+    keepalived_priority: >-
+      {{ keepalived.primary_priority
+         if '-a-' in inventory_hostname
+         else keepalived.backup_priority }}
+    keepalived_advert_interval: "{{ keepalived.advert_interval | default(1) }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+    - name: Gather network facts for Keepalived peer discovery
+      ansible.builtin.setup:
+        gather_subset:
+          - network
+    - name: Discover Keepalived interface and address from the VIP subnet
+      ansible.builtin.shell: |
+        python3 - "{{ keepalived.virtual_ip }}" "{{ keepalived_interface }}" <<'PY'
+        import ipaddress
+        import subprocess
+        import sys
+
+        network = ipaddress.ip_interface(sys.argv[1]).network
+        requested_interface = sys.argv[2]
+        for line in subprocess.check_output(
+            ["ip", "-o", "-4", "addr", "show", "scope", "global"],
+            text=True,
+        ).splitlines():
+            fields = line.split()
+            address = ipaddress.ip_interface(fields[3])
+            if (requested_interface == "auto" or fields[1] == requested_interface) and address.ip in network:
+                print(fields[1], address.ip)
+                break
+        PY
+      args:
+        executable: /bin/sh
+      register: keepalived_address_discovery
+      changed_when: false
+    - name: Validate Keepalived interface and address discovery
+      ansible.builtin.assert:
+        that:
+          - keepalived_address_discovery.stdout.split() | length == 2
+        fail_msg: "No IPv4 interface was found on the Keepalived VIP network {{ keepalived.virtual_ip }}."
+    - name: Set discovered Keepalived interface and address
+      ansible.builtin.set_fact:
+        keepalived_interface: "{{ keepalived_address_discovery.stdout.split()[0] }}"
+        traefik_keepalived_local_address: "{{ keepalived_address_discovery.stdout.split()[1] }}"
+    - name: Ensure the dynamic ingress address does not consume the VIP
+      ansible.builtin.assert:
+        that:
+          - traefik_keepalived_local_address != (keepalived.virtual_ip | regex_replace('/.*$', ''))
+        fail_msg: "NetBox allocated the Keepalived VIP {{ keepalived.virtual_ip }} to {{ inventory_hostname }}; reserve the VIP in NetBox before deployment."
+
+  roles:
+    - traefik_app
+    - keepalived_app
+    - monitoring_agent
+    - logging_agent

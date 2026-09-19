@@ -1,0 +1,29 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+data "openstack_identity_project_v3" "project" {
+  name = {{ config.project_name | tf_string }}
+}
+
+module "security_groups" {
+  source = "../../../../../../shared/terraform/openstack_security_group"
+
+  project_id = data.openstack_identity_project_v3.project.id
+
+  groups = {
+{% for name, group in config.security.groups.items() %}
+    {{ name }} = {
+      description = {{ group.description | tf_string }}
+      rules = {
+{% for rule_name, rule in group.rules.items() %}
+        {{ rule_name }} = {
+{% for key, value in rule.items() %}
+          {{ key }} = {{ (config.security.management_cidr if value == 'management_cidr' else value) | tf_value }}
+{% endfor %}
+        }
+{% endfor %}
+      }
+    }
+{% endfor %}
+  }
+}

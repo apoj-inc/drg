@@ -1,0 +1,21 @@
+---
+- name: Restart PowerDNS
+  block:
+    - name: Stop PowerDNS Recursor watchdog before handler restart
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - powerdns-recursor-watchdog.timer
+        - powerdns-recursor-watchdog.service
+      failed_when: false
+    - ansible.builtin.include_tasks: "{{ role_path }}/../compose_app/tasks/reconcile.yml"
+      vars:
+        compose_app_handler_project_src: "{{ powerdns_compose_dir }}"
+  always:
+    - name: Start PowerDNS Recursor watchdog after handler restart
+      ansible.builtin.systemd:
+        name: powerdns-recursor-watchdog.timer
+        enabled: true
+        state: started
+        daemon_reload: true

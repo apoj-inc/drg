@@ -1,0 +1,406 @@
+---
+- name: Prepare the OpenStack bare-metal host
+  hosts: openstack_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+
+  vars_files:
+    - "{{ playbook_dir }}/../../../../environments/example/platform.yaml"
+
+  vars:
+    expected_host_ip: "{{ openstack.host.management_ip }}"
+    expected_hostname: "{{ openstack.host.hostname }}"
+    expected_management_bridge: "{{ openstack.host.management_bridge }}"
+    kolla_config_directory: /etc/kolla
+    nova_instances_directory: /var/lib/nova/instances
+    docker_data_directory: /var/lib/docker
+    storage_confirmed: "{{ openstack.bootstrap.allow_storage_changes | bool }}"
+    storage_device: "{{ openstack.host.storage.cinder.device }}"
+    storage_partition: "{{ openstack.host.storage.cinder.device }}p{{ openstack.host.storage.cinder.partition }}"
+    storage_partition_number: "{{ openstack.host.storage.cinder.partition }}"
+    storage_partition_start: "{{ openstack.host.storage.cinder.partition_start }}"
+    storage_partition_end: "{{ openstack.host.storage.cinder.partition_end }}"
+    cinder_volume_group: "{{ openstack.host.storage.cinder.volume_group }}"
+    network_changes_confirmed: "{{ openstack.bootstrap.allow_network_changes | bool }}"
+    provider_veth_bridge_end: "{{ openstack.host.network.provider.bridge_end }}"
+    provider_veth_neutron_end: "{{ openstack.host.network.provider.neutron_end }}"
+
+    required_packages:
+      - ca-certificates
+      - chrony
+      - curl
+      - git
+      - gcc
+      - libdbus-glib-1-dev
+      - libffi-dev
+      - libssl-dev
+      - lvm2
+      - qemu-kvm
+      - libvirt-clients
+      - libvirt-daemon-system
+      - python3
+      - python3-dev
+      - python3-venv
+      - parted
+      - vlan
+
+  pre_tasks:
+    - name: Restore temporary management default route before package operations
+      ansible.builtin.command:
+        argv:
+          - ip
+          - route
+          - replace
+          - default
+          - via
+          - 192.0.2.1
+          - dev
+          - "{{ expected_management_bridge }}"
+      changed_when: false
+      when: network_changes_confirmed | bool
+
+    - name: Install temporary resolver configuration for package operations
+      ansible.builtin.copy:
+        src: /etc/resolv.conf
+        dest: "/etc/resolv.conf.bak-openstack-{{ ansible_date_time.iso8601_basic_short }}"
+        remote_src: true
+        mode: "0600"
+      when: network_changes_confirmed | bool
+
+    - name: Install temporary resolver configuration for package operations
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver 192.0.2.1
+          nameserver 1.1.1.1
+        mode: "0644"
+      when: network_changes_confirmed | bool
+
+    - name: Install partition inspection prerequisite
+      ansible.builtin.apt:
+        name: parted
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Validate target host identity
+      ansible.builtin.assert:
+        that:
+          - ansible_host | default('') == expected_host_ip
+          - ansible_distribution == "Debian"
+          - ansible_distribution_major_version == "13"
+          - ansible_hostname == expected_hostname
+        fail_msg: >-
+          Refusing host bootstrap: expected {{ expected_hostname }} /
+          {{ expected_host_ip }} / Debian 13, got {{ ansible_hostname }} /
+          {{ ansible_host | default('unknown') }} / {{ ansible_distribution }}
+          {{ ansible_distribution_version }}.
+
+    - name: Check management bridge address
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -o
+          - -4
+          - addr
+          - show
+          - dev
+          - "{{ expected_management_bridge }}"
+      register: management_bridge_address
+      changed_when: false
+      # This is a read-only validation and must run during host-preflight
+      # (which deliberately invokes the playbook with --check).
+      check_mode: false
+
+    - name: Require management IP on the expected bridge
+      ansible.builtin.assert:
+        that:
+          - expected_host_ip in management_bridge_address.stdout
+        fail_msg: >-
+          {{ expected_management_bridge }} does not have {{ expected_host_ip }}.
+          Network configuration is intentionally not changed by this playbook.
+
+    - name: Check KVM device
+      ansible.builtin.stat:
+        path: /dev/kvm
+      register: kvm_device
+
+    - name: Require KVM support
+      ansible.builtin.assert:
+        that:
+          - kvm_device.stat.exists
+          - kvm_device.stat.writeable
+        fail_msg: "/dev/kvm is unavailable or not writable."
+
+    - name: Check root filesystem capacity
+      ansible.builtin.shell: |
+        set -eu
+        df --output=avail -B1 / | tail -n 1
+      args:
+        executable: /bin/sh
+      register: root_free_bytes
+      changed_when: false
+      # This is a read-only validation and must run during host-preflight
+      # (which deliberately invokes the playbook with --check).
+      check_mode: false
+
+    - name: Require at least 40 GiB free on root filesystem
+      ansible.builtin.assert:
+        that:
+          - root_free_bytes.stdout | trim | int >= 42949672960
+        fail_msg: "At least 40 GiB must be free on / before Kolla bootstrap."
+
+    - name: Explicitly document that storage partitioning is not automated
+      ansible.builtin.debug:
+        msg: >-
+          Storage operations are enabled only with storage_confirmed=true and
+          after the exact target device/range checks below.
+
+    - name: Require explicit storage confirmation before destructive storage changes
+      ansible.builtin.assert:
+        that:
+          - storage_confirmed | bool
+        fail_msg: >-
+          Storage is not confirmed. Re-run with
+          -e storage_confirmed=true only after reviewing the target device and
+          partition range.
+      when: storage_confirmed | bool
+
+    - name: Verify target disk identity and unused partition slot
+      ansible.builtin.shell: |
+        set -eu
+        test -b "{{ storage_device }}"
+        sfdisk --dump "{{ storage_device }}"
+        parted -s "{{ storage_device }}" unit GiB print free
+      args:
+        executable: /bin/sh
+      register: storage_layout_before
+      changed_when: false
+      # This is a read-only validation and must run during host-preflight
+      # even when storage checks are enabled with --check.
+      check_mode: false
+      when: storage_confirmed | bool
+
+    - name: Require the expected free NVMe range
+      ansible.builtin.assert:
+        that:
+          - >-
+            storage_layout_before.stdout is search('Free Space') or
+            storage_layout_before.stdout is search('nvme0n1p4')
+        fail_msg: >-
+          Neither the expected free range nor an existing p4 was confirmed on
+          {{ storage_device }}. No storage changes will be made.
+      when: storage_confirmed | bool
+
+    - name: Detect existing Cinder partition
+      ansible.builtin.stat:
+        path: "{{ storage_partition }}"
+      register: storage_partition_state
+      when: storage_confirmed | bool
+
+  tasks:
+    - name: Set the expected hostname
+      ansible.builtin.hostname:
+        name: "{{ expected_hostname }}"
+
+    - name: Install host and Kolla prerequisites
+      ansible.builtin.apt:
+        name: "{{ required_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Backup partition table before Cinder partitioning
+      ansible.builtin.shell: |
+        set -eu
+        sfdisk --dump "{{ storage_device }}" > "/root/{{ storage_device | basename }}.partition-table.before-cinder"
+      args:
+        executable: /bin/sh
+        creates: "/root/{{ storage_device | basename }}.partition-table.before-cinder"
+      when: >-
+        storage_confirmed | bool and
+        not storage_partition_state.stat.exists
+
+    - name: Create the dedicated Cinder partition
+      community.general.parted:
+        device: "{{ storage_device }}"
+        number: "{{ storage_partition_number }}"
+        label: gpt
+        part_type: primary
+        name: cinder
+        part_start: "{{ storage_partition_start }}"
+        part_end: "{{ storage_partition_end }}"
+        state: present
+      when: >-
+        storage_confirmed | bool and
+        not storage_partition_state.stat.exists
+
+    - name: Re-read partition table
+      ansible.builtin.command: partprobe "{{ storage_device }}"
+      changed_when: false
+      when: storage_confirmed | bool
+
+    - name: Wait for the dedicated Cinder partition
+      ansible.builtin.wait_for:
+        path: "{{ storage_partition }}"
+        state: present
+        timeout: 30
+      when: storage_confirmed | bool
+
+    - name: Create Cinder physical volume and volume group
+      community.general.lvg:
+        vg: "{{ cinder_volume_group }}"
+        pvs: "{{ storage_partition }}"
+        pvresize: true
+        state: present
+      when: storage_confirmed | bool
+
+    - name: Verify Cinder volume group
+      ansible.builtin.command: vgs "{{ cinder_volume_group }}"
+      register: cinder_vg
+      changed_when: false
+      check_mode: false
+      when: storage_confirmed | bool
+
+    - name: Backup network configuration before provider changes
+      ansible.builtin.copy:
+        src: /etc/network/interfaces
+        dest: "/etc/network/interfaces.bak-openstack-{{ ansible_date_time.iso8601_basic_short }}"
+        remote_src: true
+        mode: "0600"
+      when: network_changes_confirmed | bool
+
+    - name: Configure persistent provider veth only when explicitly confirmed
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        marker: "# {mark} OPENSTACK PROVIDER VETH"
+        block: |
+          auto {{ provider_veth_bridge_end }}
+          iface {{ provider_veth_bridge_end }} inet manual
+              pre-up ip link show {{ provider_veth_bridge_end }} >/dev/null 2>&1 || ip link add {{ provider_veth_bridge_end }} type veth peer name {{ provider_veth_neutron_end }}
+              up ip link set {{ provider_veth_neutron_end }} up
+              up ip link set {{ provider_veth_bridge_end }} master {{ expected_management_bridge }}
+              down ip link del {{ provider_veth_bridge_end }} 2>/dev/null || true
+      when: network_changes_confirmed | bool
+
+    - name: Correct persistent management gateway
+      ansible.builtin.replace:
+        path: /etc/network/interfaces
+        regexp: '^\s*getway\s+192\.168\.2\.1\s*$'
+        replace: "	gateway 192.0.2.1"
+      when: network_changes_confirmed | bool
+
+    - name: Configure persistent management DNS resolvers
+      ansible.builtin.lineinfile:
+        path: /etc/network/interfaces
+        regexp: '^\s*dns-nameservers\s+'
+        line: "	dns-nameservers 192.0.2.1 1.1.1.1"
+        insertafter: '^iface br0 inet static$'
+      when: network_changes_confirmed | bool
+
+    - name: Ensure management gateway is present exactly once
+      ansible.builtin.lineinfile:
+        path: /etc/network/interfaces
+        regexp: '^\s*gateway\s+192\.168\.2\.1\s*$'
+        line: "	gateway 192.0.2.1"
+        insertafter: '^iface br0 inet static$'
+      when: network_changes_confirmed | bool
+
+    - name: Activate provider veth without restarting management bridge
+      ansible.builtin.command: ifup "{{ provider_veth_bridge_end }}"
+      register: provider_veth_up
+      changed_when: provider_veth_up.rc == 0
+      failed_when: provider_veth_up.rc != 0 and 'already configured' not in provider_veth_up.stderr
+      when: network_changes_confirmed | bool
+
+    - name: Ensure chrony is enabled
+      ansible.builtin.service:
+        name: chrony
+        state: started
+        enabled: true
+
+    - name: Load virtualization and bridge kernel modules
+      community.general.modprobe:
+        name: "{{ item }}"
+        persistent: present
+        state: present
+      loop:
+        - kvm
+        - kvm_amd
+        - kvm_intel
+        - br_netfilter
+        - 8021q
+      when: >-
+        (item != 'kvm_intel' or
+         (ansible_facts.processor | join(' ') is search('Intel'))) and
+        (item != 'kvm_amd' or
+         (ansible_facts.processor | join(' ') is search('AMD')))
+
+    - name: Configure host networking sysctls
+      ansible.posix.sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: true
+        sysctl_file: /etc/sysctl.d/99-openstack-host.conf
+      loop:
+        - {name: net.ipv4.ip_forward, value: "1"}
+        - {name: net.bridge.bridge-nf-call-iptables, value: "1"}
+        - {name: net.bridge.bridge-nf-call-ip6tables, value: "1"}
+
+    - name: Create Kolla and Nova directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner | default('root') }}"
+        group: "{{ item.group | default('root') }}"
+        mode: "{{ item.mode | default('0755') }}"
+      loop:
+        - {path: "{{ kolla_config_directory }}", mode: "0755"}
+        - {path: "{{ kolla_config_directory }}/config", mode: "0755"}
+        - {path: "{{ nova_instances_directory }}", mode: "0755"}
+        - {path: "{{ docker_data_directory }}", mode: "0711"}
+
+    - name: Keep host libvirt daemon stopped for Kolla nova-libvirt
+      ansible.builtin.service:
+        name: libvirtd
+        state: stopped
+        enabled: false
+
+    - name: Disable host libvirt socket activation for Kolla nova-libvirt
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - libvirtd.socket
+        - virtlogd.socket
+        - virtlockd.socket
+
+    - name: Remove stale host libvirt socket for Kolla nova-libvirt
+      ansible.builtin.file:
+        path: /var/run/libvirt/libvirt-sock
+        state: absent
+
+    - name: Collect final host facts
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - >-
+            hostnamectl --static;
+            nproc;
+            free -h;
+            ip -br addr;
+            lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS;
+            vgs || true;
+            test -e /dev/kvm
+      register: final_host_facts
+      changed_when: false
+      # Keep the diagnostic output useful in host-preflight --check.
+      check_mode: false
+
+    - name: Print final host facts
+      ansible.builtin.debug:
+        var: final_host_facts.stdout_lines

@@ -1,0 +1,11 @@
+---
+debian_mirrors_enabled: true
+debian_mirrors_primary: http://ftp.de.debian.org/debian
+debian_mirrors_fallback: https://mirror.yandex.ru/debian
+debian_security_mirrors_primary: http://security.debian.org/debian-security
+debian_security_mirrors_fallback: https://mirror.yandex.ru/debian-security
+debian_mirrors_components:
+  - main
+  - contrib
+  - non-free
+  - non-free-firmware

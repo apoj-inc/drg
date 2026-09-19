@@ -1,0 +1,9 @@
+---
+http:
+  - name: grafana
+    host: "grafana.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 3000
+    middlewares:
+      - lan-and-vpn-only
+      - secure-headers
+      - rate-limit

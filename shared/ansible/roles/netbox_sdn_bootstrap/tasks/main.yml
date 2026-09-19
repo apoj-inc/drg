@@ -1,0 +1,34 @@
+---
+- name: Run NetBox SDN bootstrap preflight
+  ansible.builtin.import_tasks: preflight.yml
+  tags:
+    - sdn_bootstrap
+    - bootstrap
+
+- name: Prepare NetBox module runtime
+  ansible.builtin.import_role:
+    name: netbox_app
+    tasks_from: install
+  tags:
+    - sdn_bootstrap
+    - bootstrap
+
+- name: Read NetBox API token
+  ansible.builtin.import_role:
+    name: netbox_app
+    tasks_from: token
+  tags:
+    - sdn_bootstrap
+    - bootstrap
+
+- name: Seed NetBox SDN objects
+  ansible.builtin.import_tasks: seed.yml
+  tags:
+    - sdn_bootstrap
+    - bootstrap
+
+- name: Check SDN bootstrap result
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - sdn_bootstrap
+    - healthcheck

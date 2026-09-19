@@ -1,0 +1,140 @@
+---
+- name: Validate etcd HA settings
+  ansible.builtin.assert:
+    that:
+      - etcd_ha_group | length > 0
+      - groups[etcd_ha_group] is defined
+      - groups[etcd_ha_group] | length >= 1
+      - >-
+        (
+          groups[etcd_ha_group]
+          | map('extract', hostvars, 'ansible_host')
+          | list
+          | unique
+          | length
+        ) == groups[etcd_ha_group] | length
+      - etcd_ha_service_name | length > 0
+      - etcd_ha_service_unit | length > 0
+      - etcd_ha_service_exec_start | length > 0
+      - etcd_ha_service_exec_stop | length > 0
+      - etcd_ha_controller_name | length > 0
+      - etcd_ha_controller_unit | length > 0
+      - etcd_ha_lease_ttl | int >= 10
+      - etcd_ha_poll_interval | int > 0
+      - etcd_ha_healthcheck_command | length > 0
+    fail_msg: >-
+      etcd HA requires at least one candidate with a distinct ansible_host
+      address and complete service/controller variables. Add more candidates
+      for failover.
+  run_once: true
+
+- name: Derive etcd endpoints when they were not supplied explicitly
+  ansible.builtin.set_fact:
+    etcd_ha_effective_endpoints: >-
+      {{
+        etcd_ha_endpoints
+        if etcd_ha_endpoints | length > 0
+        else
+        (
+          groups[etcd_ha_etcd_group] | default([])
+          | map('extract', hostvars)
+          | map(attribute='ansible_host')
+          | map('regex_replace', '^(.*)$', etcd_ha_endpoint_scheme ~ '://\\1:' ~ (etcd_ha_endpoint_port | string))
+          | list
+        )
+      }}
+
+- name: Validate that etcd has endpoints
+  ansible.builtin.assert:
+    that:
+      - etcd_ha_effective_endpoints | length >= 1
+      - etcd_ha_effective_endpoints | select('match', '^(https?)://[^:]+:[0-9]+$') | list | length == etcd_ha_effective_endpoints | length
+    fail_msg: "etcd HA requires at least one valid etcd client endpoint."
+  run_once: true
+
+- name: Install etcd client and controller prerequisites
+  ansible.builtin.apt:
+    name:
+      - etcd-client
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Render the service unit controlled by the etcd lease
+  ansible.builtin.template:
+    src: etcd-ha-service.service.j2
+    dest: "/etc/systemd/system/{{ etcd_ha_service_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render etcd HA controller configuration
+  ansible.builtin.template:
+    src: etcd-ha-controller.env.j2
+    dest: "{{ etcd_ha_controller_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Install generic etcd HA controller
+  ansible.builtin.template:
+    src: etcd-ha-controller.sh.j2
+    dest: "{{ etcd_ha_controller_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  notify: Restart etcd HA controller
+
+- name: Install etcd HA controller systemd unit
+  ansible.builtin.template:
+    src: etcd-ha-controller.service.j2
+    dest: "/etc/systemd/system/{{ etcd_ha_controller_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart etcd HA controller
+
+- name: Ensure an optional shared service filesystem is mounted
+  ansible.builtin.file:
+    path: "{{ etcd_ha_shared_mountpoint }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - etcd_ha_storage_backend | lower == 'shared_filesystem'
+    - etcd_ha_shared_mountpoint | length > 0
+    - etcd_ha_shared_mount_source | length > 0
+
+- name: Mount an optional shared service filesystem
+  ansible.posix.mount:
+    path: "{{ etcd_ha_shared_mountpoint }}"
+    src: "{{ etcd_ha_shared_mount_source }}"
+    fstype: "{{ etcd_ha_shared_mount_fstype }}"
+    opts: "{{ etcd_ha_shared_mount_options }}"
+    state: mounted
+  when:
+    - etcd_ha_storage_backend | lower == 'shared_filesystem'
+    - etcd_ha_shared_mountpoint | length > 0
+    - etcd_ha_shared_mount_source | length > 0
+
+- name: Disable direct application startup
+  ansible.builtin.systemd:
+    name: "{{ etcd_ha_service_unit }}"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+
+- name: Enable and start etcd HA controller
+  ansible.builtin.systemd:
+    name: "{{ etcd_ha_controller_unit }}"
+    enabled: true
+    state: "{{ 'started' if etcd_ha_start_controller | bool else 'stopped' }}"
+    daemon_reload: true
+
+- name: Publish consistent etcd HA facts
+  ansible.builtin.set_fact:
+    etcd_ha_managed_by_controller: true
+    etcd_ha_resource_configured: true

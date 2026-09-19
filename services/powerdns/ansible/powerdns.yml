@@ -1,0 +1,39 @@
+---
+- name: Deploy PowerDNS authoritative DNS
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('tags_powerdns', true) }}"
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../config.yaml
+  vars:
+    powerdns_image_tag: "{{ powerdns.image_tag }}"
+    powerdns_listen_address: "{{ powerdns.listen_address }}"
+    powerdns_dns_port: "{{ powerdns.dns_port }}"
+    powerdns_api_address: "{{ powerdns.api_address }}"
+    powerdns_api_port: "{{ powerdns.api_port }}"
+    powerdns_monitoring_allowed_cidrs: "{{ powerdns.monitoring_allowed_cidrs | default([]) }}"
+    powerdns_recursor_image_tag: "{{ powerdns.recursor.image_tag }}"
+    powerdns_recursor_listen_address: "{{ powerdns.recursor.listen_address }}"
+    powerdns_recursor_dns_port: "{{ powerdns.recursor.dns_port }}"
+    powerdns_recursor_metrics_port: "{{ powerdns.recursor.metrics_port | default(8082) }}"
+    powerdns_recursor_default_dns: "{{ powerdns.recursor.default_dns }}"
+    powerdns_dnsdist_image_tag: "{{ powerdns.dnsdist.image_tag }}"
+    powerdns_dnsdist_listen_address: "{{ powerdns.dnsdist.listen_address }}"
+    powerdns_dnsdist_dns_port: "{{ powerdns.dnsdist.dns_port }}"
+    powerdns_dnsdist_peer_group: tags_powerdns
+    powerdns_local_zone: "{{ powerdns.local_zone }}"
+    powerdns_static_allow_from: "{{ powerdns.static_allow_from }}"
+    powerdns_host_entries: "{{ powerdns.host_entries | default([]) }}"
+    powerdns_postgresql_host: "{{ powerdns.postgresql.host }}"
+    powerdns_postgresql_address: "{{ powerdns.postgresql.address }}"
+    powerdns_postgresql_port: "{{ powerdns.postgresql.port }}"
+    powerdns_postgresql_database: "{{ powerdns.postgresql.database }}"
+    powerdns_postgresql_username: "{{ powerdns.postgresql.username }}"
+    powerdns_api_key: "{{ lookup('env', 'POWERDNS_API_KEY') }}"
+    powerdns_postgresql_password: "{{ lookup('env', 'POWERDNS_POSTGRESQL_PASSWORD') }}"
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+  roles:
+    - powerdns_app
+    - monitoring_agent
+    - logging_agent

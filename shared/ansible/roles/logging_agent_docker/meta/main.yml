@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  role_name: logging_agent_docker
+  description: Configures the Docker log source for the shared Alloy agent.
+  min_ansible_version: "2.16"
+
+dependencies: []

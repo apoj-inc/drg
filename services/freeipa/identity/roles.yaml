@@ -1,0 +1,11 @@
+---
+# Delegated roles for non-interactive service accounts.
+roles:
+  - name: ipa-enroller
+    state: present
+    description: CI host enrollment delegation
+    user: [ipa-enroller]
+    privilege:
+      - Host Enrollment
+      - Host Administrators
+      - Host Group Administrators

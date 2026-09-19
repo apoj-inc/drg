@@ -1,0 +1,24 @@
+---
+identity:
+  description: DRG service workloads
+  compute_quota:
+    cores: 256
+    instances: 100
+    ram: 524288
+    key_pairs: 100
+    server_groups: 50
+    server_group_members: 200
+  network_quota:
+    network: 100
+    subnet: 100
+    port: 500
+    router: 50
+    floatingip: 100
+    security_group: 50
+    security_group_rule: 500
+  volume_quota:
+    volumes: 100
+    snapshots: 100
+    gigabytes: 10000
+    backups: 50
+    backup_gigabytes: 10000

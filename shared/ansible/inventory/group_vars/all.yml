@@ -1,0 +1,18 @@
+---
+ansible_user: "{{ lookup('env', 'ANSIBLE_USER') | default('root', true) }}"
+ansible_password: "{{ lookup('env', 'ANSIBLE_CI_PASSWORD') }}"
+ansible_ssh_private_key_file: "{{ lookup('env', 'ANSIBLE_PRIVATE_KEY_FILE') }}"
+ansible_python_interpreter: /usr/bin/python3
+ansible_ssh_common_args: "{{ lookup('env', 'ANSIBLE_SSH_COMMON_ARGS') | default('-o StrictHostKeyChecking=accept-new', true) }}"
+
+# Optional egress proxy is configured in the platform file. An environment
+# variable can override it for an individual deployment.
+platform_config_file: "{{ lookup('env', 'PLATFORM_CONFIG_FILE') | default(playbook_dir ~ '/../../../environments/example/platform.yaml', true) }}"
+platform_config: "{{ lookup('file', platform_config_file) | from_yaml }}"
+external_download_proxy_url: "{{ lookup('env', 'EXTERNAL_DOWNLOAD_PROXY_URL') | default(platform_config.egress_proxy.https | default('', true), true) }}"
+external_download_environment: >-
+  {{ (external_download_proxy_url | length > 0) |
+     ternary({
+       'https_proxy': external_download_proxy_url,
+       'HTTPS_PROXY': external_download_proxy_url
+     }, {}) }}

@@ -1,0 +1,81 @@
+---
+- name: Initialize service Traefik route definition
+  ansible.builtin.set_fact:
+    traefik_route_config: {}
+    traefik_route_has_routes: false
+
+- name: Load service Traefik route definition
+  ansible.builtin.set_fact:
+    traefik_route_config: >-
+      {{ lookup(
+           'template',
+           traefik_route_file,
+           template_vars=hostvars[traefik_route_template_host]
+         ) | from_yaml }}
+  when: traefik_route_file is file
+  tags: [traefik-managed-route, configure, deploy]
+
+- name: Detect enabled service Traefik routes
+  ansible.builtin.set_fact:
+    traefik_route_has_routes: >-
+      {{
+        (traefik_route_config.http | default([]) | length > 0) or
+        (traefik_route_config.tcp | default([]) | length > 0) or
+        (traefik_route_config.udp | default([]) | length > 0)
+      }}
+  tags: [traefik-managed-route, configure, deploy]
+
+- name: Record managed Traefik route status
+  ansible.builtin.set_fact:
+    traefik_route_config_status: >-
+      {{
+        (traefik_route_config_status | default({})) |
+        combine({traefik_proxy_config_name: traefik_route_has_routes | bool})
+      }}
+  tags: [traefik-managed-route, configure, deploy]
+
+- name: Ensure Traefik app config directory exists
+  ansible.builtin.file:
+    path: "{{ traefik_proxy_config_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ traefik_target_host }}"
+  loop: "{{ traefik_proxy_hosts }}"
+  loop_control:
+    loop_var: traefik_target_host
+  when:
+    - traefik_route_has_routes | bool
+  tags: [traefik-managed-route, configure, deploy]
+
+- name: Copy public CA certificates required by service routes
+  ansible.builtin.include_tasks: root_ca.yml
+  loop: "{{ traefik_proxy_root_ca_sources }}"
+  loop_control:
+    loop_var: traefik_proxy_root_ca_source
+  when:
+    - traefik_route_has_routes | bool
+  tags: [traefik-managed-route, configure, deploy]
+
+- name: Write Traefik dynamic config for service
+  ansible.builtin.template:
+    src: service.yml.j2
+    dest: "{{ traefik_proxy_config_dir }}/{{ traefik_proxy_config_name }}.yml"
+    mode: "0644"
+  delegate_to: "{{ traefik_target_host }}"
+  loop: "{{ traefik_proxy_hosts }}"
+  loop_control:
+    loop_var: traefik_target_host
+  register: traefik_proxy_config_result
+  when:
+    - traefik_route_has_routes | bool
+  tags: [traefik-managed-route, configure, deploy]
+
+- name: Record dynamic route file changes
+  ansible.builtin.set_fact:
+    traefik_route_configs_changed: >-
+      {{ (traefik_route_configs_changed | default(false) | bool) or
+         ((traefik_proxy_config_result.results | default([]) |
+           selectattr('changed', 'defined') | selectattr('changed') | list | length) > 0) }}
+  when:
+    - traefik_route_has_routes | default(false) | bool
+  tags: [traefik-managed-route, deploy]

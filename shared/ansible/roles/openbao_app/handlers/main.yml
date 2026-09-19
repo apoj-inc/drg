@@ -1,0 +1,6 @@
+---
+- name: Restart OpenBao
+  ansible.builtin.include_tasks: "{{ role_path }}/../compose_app/tasks/reconcile.yml"
+  vars:
+    compose_app_handler_project_src: "{{ openbao_compose_dir }}"
+    compose_app_handler_state: restarted

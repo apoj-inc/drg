@@ -1,0 +1,3 @@
+http:
+  middlewares:
+{{ traefik_middlewares | to_nice_yaml(indent=2, width=1337) | indent(4, true) }}

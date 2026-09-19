@@ -1,0 +1,15 @@
+---
+- name: Install PostgreSQL client for schema management
+  ansible.builtin.apt:
+    name:
+      - postgresql-client
+      - curl
+    state: present
+    update_cache: true
+- name: Ensure PowerDNS directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ powerdns_compose_dir }}"

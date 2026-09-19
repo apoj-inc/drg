@@ -1,0 +1,184 @@
+---
+- name: Set postgres superuser password
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      psql --quiet --no-align --tuples-only --set=password="$POSTGRESQL_ADMIN_PASSWORD" <<'SQL'
+      ALTER USER postgres WITH PASSWORD :'password';
+      SQL
+    executable: /bin/bash
+  environment:
+    POSTGRESQL_ADMIN_PASSWORD: "{{ postgresql_admin_password }}"
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+  changed_when: false
+  no_log: true
+
+- name: Create Patroni replication role
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      if psql --quiet --no-align --tuples-only --set=role_name="$POSTGRESQL_REPLICATION_USER" <<'SQL' | grep -qx 1
+      SELECT 1 FROM pg_roles WHERE rolname = :'role_name';
+      SQL
+      then
+        psql --quiet --set=role_name="$POSTGRESQL_REPLICATION_USER" --set=role_password="$POSTGRESQL_REPLICATION_PASSWORD" <<'SQL'
+        ALTER ROLE :"role_name" WITH REPLICATION LOGIN PASSWORD :'role_password';
+      SQL
+      else
+        psql --quiet --set=role_name="$POSTGRESQL_REPLICATION_USER" --set=role_password="$POSTGRESQL_REPLICATION_PASSWORD" <<'SQL'
+        CREATE ROLE :"role_name" WITH REPLICATION LOGIN PASSWORD :'role_password';
+      SQL
+      fi
+    executable: /bin/bash
+  environment:
+    POSTGRESQL_REPLICATION_USER: "{{ postgresql_replication_user }}"
+    POSTGRESQL_REPLICATION_PASSWORD: "{{ postgresql_replication_password }}"
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+  changed_when: false
+  no_log: true
+  when: postgresql_patroni_enabled | bool
+
+- name: Create application roles
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      if psql --quiet --no-align --tuples-only --set=role_name="$POSTGRESQL_ROLE" <<'SQL' | grep -qx 1
+      SELECT 1 FROM pg_roles WHERE rolname = :'role_name';
+      SQL
+      then
+        psql --quiet --set=role_name="$POSTGRESQL_ROLE" --set=role_password="$POSTGRESQL_PASSWORD" <<'SQL'
+        ALTER ROLE :"role_name" LOGIN PASSWORD :'role_password';
+      SQL
+      else
+        psql --quiet --set=role_name="$POSTGRESQL_ROLE" --set=role_password="$POSTGRESQL_PASSWORD" <<'SQL'
+        CREATE ROLE :"role_name" LOGIN PASSWORD :'role_password';
+      SQL
+      fi
+    executable: /bin/bash
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.owner }}"
+  environment:
+    POSTGRESQL_ROLE: "{{ item.owner }}"
+    POSTGRESQL_PASSWORD: "{{ item.password }}"
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+  changed_when: false
+  no_log: true
+
+- name: Create Prometheus monitoring role
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      if printf '%s\n' "SELECT 1 FROM pg_roles WHERE rolname = :'role_name';" | \
+        psql --quiet --no-align --tuples-only --set=role_name="$POSTGRESQL_PROMETHEUS_USER" | grep -qx 1
+      then
+        printf '%s\n' "ALTER ROLE :\"role_name\" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT PASSWORD :'role_password';" | \
+          psql --quiet --set=role_name="$POSTGRESQL_PROMETHEUS_USER" \
+            --set=role_password="$POSTGRESQL_PROMETHEUS_PASSWORD"
+      else
+        printf '%s\n' "CREATE ROLE :\"role_name\" WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT PASSWORD :'role_password';" | \
+          psql --quiet --set=role_name="$POSTGRESQL_PROMETHEUS_USER" \
+            --set=role_password="$POSTGRESQL_PROMETHEUS_PASSWORD"
+      fi
+      printf '%s\n' "GRANT pg_monitor TO :\"role_name\";" | \
+        psql --quiet --set=role_name="$POSTGRESQL_PROMETHEUS_USER"
+    executable: /bin/bash
+  environment:
+    POSTGRESQL_PROMETHEUS_USER: "{{ postgresql_prometheus_user }}"
+    POSTGRESQL_PROMETHEUS_PASSWORD: "{{ postgresql_prometheus_password }}"
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+  changed_when: false
+  no_log: true
+
+- name: Check existing databases
+  ansible.builtin.command:
+    argv:
+      - psql
+      - --quiet
+      - --no-align
+      - --tuples-only
+      - --command
+      - "SELECT 1 FROM pg_database WHERE datname = '{{ item.name }}';"
+  register: postgresql_database_exists
+  changed_when: false
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+  environment:
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+
+- name: Create application databases
+  ansible.builtin.command:
+    argv:
+      - createdb
+      - --owner
+      - "{{ item.item.owner }}"
+      - --encoding
+      - "{{ postgresql_encoding }}"
+      - --locale
+      - "{{ postgresql_locale }}"
+      - --template
+      - template0
+      - "{{ item.item.name }}"
+  loop: "{{ postgresql_database_exists.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.stdout | trim != "1"
+  environment:
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+
+- name: Apply database-level settings
+  ansible.builtin.command:
+    argv:
+      - psql
+      - --quiet
+      - --dbname
+      - postgres
+      - --command
+      - "ALTER DATABASE {{ item.name }} SET statement_timeout = '60s';"
+  changed_when: false
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+  environment:
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+
+- name: Install required extensions
+  ansible.builtin.command:
+    argv:
+      - psql
+      - --quiet
+      - --dbname
+      - "{{ item.0.name }}"
+      - --command
+      - "CREATE EXTENSION IF NOT EXISTS {{ item.1 }};"
+  changed_when: false
+  loop: "{{ postgresql_databases | subelements('extensions') }}"
+  loop_control:
+    label: "{{ item.0.name }}:{{ item.1 }}"
+  environment:
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"

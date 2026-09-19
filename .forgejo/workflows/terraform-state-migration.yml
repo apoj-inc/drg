@@ -1,0 +1,65 @@
+---
+name: Terraform state migration
+
+"on":
+  workflow_dispatch:
+    inputs:
+      state_names:
+        description: Comma-separated legacy GitLab state names
+        required: false
+        default: production-dockerhub
+        type: string
+      services:
+        description: Comma-separated services to derive legacy state names from
+        required: false
+        default: ''
+        type: string
+      environment:
+        description: Deployment environment
+        required: true
+        default: production
+        type: string
+      mode:
+        description: Migration mode
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply]
+      confirm_apply:
+        description: Confirm state migration apply
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  migrate:
+    runs-on: forgejo-host
+    enable-openid-connect: true
+    steps:
+      - name: Check out repository
+        uses: https://data.forgejo.org/actions/checkout@v6
+      - name: Migrate legacy GitLab state
+        env:
+          MIGRATION_STATE_NAMES: ${{ inputs.state_names }}
+          MIGRATION_SERVICES: ${{ inputs.services }}
+          MIGRATION_ENVIRONMENT: ${{ inputs.environment }}
+          MIGRATION_MODE: ${{ inputs.mode }}
+          MIGRATION_CONFIRM_APPLY: ${{ inputs.confirm_apply }}
+          GITLAB_API_URL: ${{ vars.GITLAB_API_URL }}
+          GITLAB_PROJECT_ID: ${{ vars.GITLAB_PROJECT_ID }}
+          TF_HTTP_USERNAME: ${{ secrets.GITLAB_TERRAFORM_STATE_USERNAME }}
+          TF_HTTP_PASSWORD: ${{ secrets.GITLAB_TERRAFORM_STATE_PASSWORD }}
+          PG_CONN_STR: postgresql://terraform_state@postgresql.example.test:5432/terraform_state?sslmode=disable
+          MIGRATION_REPO_ROOT: ${{ forgejo.workspace }}
+          MIGRATION_REPORT_PATH: ${{ forgejo.workspace }}/terraform-state-migration-report.json
+        run: |
+          set -eu
+          if [ "$MIGRATION_CONFIRM_APPLY" = "true" ]; then export MIGRATION_CONFIRM=MIGRATE; fi
+          python3 shared/scripts/migrate_terraform_state.py
+      - name: Upload migration report
+        if: always()
+        uses: https://data.forgejo.org/actions/upload-artifact@v3
+        with:
+          name: terraform-state-migration-report
+          path: terraform-state-migration-report.json
+          if-no-files-found: ignore

@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: openbao_app
+  author: repository
+  description: OpenBao server deployed with Docker Compose
+  license: internal
+  min_ansible_version: "2.14"
+
+dependencies:
+  - role: debian_mirrors

@@ -1,0 +1,20 @@
+---
+pacemaker_ha_group: ""
+pacemaker_ha_cluster_name: ""
+pacemaker_ha_resource_name: ""
+pacemaker_ha_service_name: ""
+pacemaker_ha_service_description: "Application managed by Pacemaker"
+pacemaker_ha_service_working_directory: ""
+pacemaker_ha_service_exec_start: ""
+pacemaker_ha_service_exec_stop: ""
+pacemaker_ha_service_requires:
+  - docker.service
+pacemaker_ha_service_after:
+  - docker.service
+pacemaker_ha_service_wants: []
+pacemaker_ha_service_timeout_start: 180
+pacemaker_ha_service_timeout_stop: 180
+pacemaker_ha_corosync_authkey_file: ""
+pacemaker_ha_generate_corosync_authkey: false
+pacemaker_ha_corosync_authkey_stage_path: /tmp/pacemaker-ha-corosync-authkey
+pacemaker_ha_cluster_setup_path: /usr/local/sbin/pacemaker-ha-cluster-setup

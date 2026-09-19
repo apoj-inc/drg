@@ -1,0 +1,113 @@
+---
+service:
+  name: woodpecker
+  topology: etcd-active-passive
+  description: Woodpecker CI server control plane with etcd lease failover.
+  tags: [opentofu, woodpecker, woodpecker-server, traefik-managed-route]
+
+ha:
+  backend: etcd
+  etcd_group: etcd
+  etcd_endpoints:
+    - http://etcd-node-a.example.test:2379
+    - http://etcd-node-b.example.test:2379
+    - http://etcd-node-c.example.test:2379
+
+rollout:
+  by_contour: true
+
+startup:
+  order: 175
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A: {start: 1400}
+      B: {start: 1401}
+
+compute:
+  cpu_cores: 4
+  memory_mb: 8192
+  swap_mb: 1024
+  disk_gb: 40
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+    keyctl: false
+    fuse: false
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      dns_name_pattern: woodpecker-%{cluster}-%{contour}-%02d
+      role: app
+      ansible_primary: true
+
+dns:
+  canonical_name: ci.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+woodpecker:
+  version: 3.18.0
+  image: woodpeckerci/woodpecker-server
+  external_url: https://ci.example.test
+  # Used when Woodpecker creates the signed Forgejo repository hook.
+  webhook_host: https://ci.example.test
+  forgejo_url: https://forge.example.test
+  # OAuth client credentials are registered in Forgejo and injected from OpenBao.
+  forgejo_client: 00000000-0000-4000-8000-000000000000
+  admin: example-admin
+  organization: example-org
+  http_port: 8000
+  grpc_port: 9000
+  database_host: postgresql.example.test
+  database_port: 5432
+  database_name: woodpecker
+  database_user: woodpecker
+  config_extension:
+    listen: 0.0.0.0:9010
+    endpoint: http://host.docker.internal:9010/ciconfig
+    netrc: true
+    secret_endpoint: http://host.docker.internal:9010/secrets
+    secret_netrc: false
+    openbao:
+      address: https://openbao-example-cluster-a-01.example.test:8202
+      auth_path: cert
+      cert_role: woodpecker-config-extension
+      ca_file: /etc/woodpecker/openbao/freeipa-ca.crt
+      cert_file: /etc/woodpecker/openbao/client.crt
+      key_file: /etc/woodpecker/openbao/client.key
+      allowed_repositories: example-org/example-repository
+
+secrets:
+  path: kv/services/woodpecker
+  file_fields:
+    woodpecker_corosync_authkey: base64
+  fields:
+    - woodpecker_forgejo_secret
+    - woodpecker_grpc_secret
+    - postgresql_woodpecker_password
+    # Base64-encoded Corosync authkey, shared by both HA nodes.
+    - woodpecker_corosync_authkey
+
+freeipa_client:
+  hostgroups: [service-woodpecker]

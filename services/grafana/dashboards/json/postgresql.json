@@ -1,0 +1,151 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "pg_up",
+                    "refId": "A"
+                }
+            ],
+            "title": "PostgreSQL up",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "sum(patroni_primary)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Primary count",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "sum(patroni_postgres_running)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Running nodes",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "sum(patroni_pending_restart)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Pending restarts",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "patroni_primary",
+                    "legendFormat": "{{instance}} primary",
+                    "refId": "A"
+                },
+                {
+                    "expr": "patroni_replica",
+                    "legendFormat": "{{instance}} replica",
+                    "refId": "B"
+                },
+                {
+                    "expr": "patroni_postgres_streaming",
+                    "legendFormat": "{{instance}} streaming",
+                    "refId": "C"
+                }
+            ],
+            "title": "Patroni roles",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "expr": "time() - (patroni_xlog_replayed_timestamp > 0)",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Replication replay lag seconds",
+            "description": "Only replicas with a non-zero replay timestamp are shown; the primary reports 0.",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "postgresql",
+        "patroni"
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "title": "PostgreSQL / Patroni",
+    "uid": "postgresql",
+    "version": 2
+}

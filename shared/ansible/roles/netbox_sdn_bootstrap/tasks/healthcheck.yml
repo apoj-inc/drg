@@ -1,0 +1,12 @@
+---
+- name: Verify NetBox API is reachable after SDN bootstrap
+  ansible.builtin.uri:
+    url: "http://localhost:{{ netbox_http_port }}/api/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ netbox_token }}"
+      Accept: application/json
+    validate_certs: "{{ netbox_validate_certs }}"
+    status_code: 200
+  changed_when: false
+  no_log: true

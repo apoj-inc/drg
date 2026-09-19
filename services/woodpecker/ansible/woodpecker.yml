@@ -1,0 +1,116 @@
+---
+- name: Deploy Woodpecker CI
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('woodpecker-example-cluster-*', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    woodpecker_ha_backend: "{{ ha.backend | default('etcd') }}"
+    woodpecker_ha_sync: "{{ lookup('env', 'HA_SYNC') | default('false', true) | bool }}"
+    woodpecker_ha_group: woodpecker_ha_servers
+    pacemaker_ha_group: "{{ woodpecker_ha_group }}"
+    pacemaker_ha_cluster_name: woodpecker-ha
+    pacemaker_ha_resource_name: woodpecker-service
+    pacemaker_ha_service_name: woodpecker-ha.service
+    pacemaker_ha_service_description: Woodpecker server container managed by Pacemaker
+    pacemaker_ha_service_working_directory: /opt/woodpecker
+    pacemaker_ha_service_exec_start: /usr/local/sbin/woodpecker-ha-control start
+    pacemaker_ha_service_exec_stop: /usr/local/sbin/woodpecker-ha-control stop
+    pacemaker_ha_service_after:
+      - docker.service
+      - network-online.target
+    pacemaker_ha_service_wants:
+      - network-online.target
+    pacemaker_ha_corosync_authkey_file: "{{ lookup('env', 'WOODPECKER_COROSYNC_AUTHKEY') }}"
+    pacemaker_ha_cluster_setup_path: /usr/local/sbin/pacemaker-ha-cluster-setup
+    etcd_ha_group: "{{ woodpecker_ha_group }}"
+    etcd_ha_etcd_group: "{{ ha.etcd_group | default('etcd') }}"
+    etcd_ha_endpoints: "{{ ha.etcd_endpoints | default([]) }}"
+    etcd_ha_controller_name: woodpecker
+    etcd_ha_controller_unit: woodpecker-etcd-ha.service
+    etcd_ha_service_name: woodpecker
+    etcd_ha_service_unit: woodpecker-ha.service
+    etcd_ha_service_description: Woodpecker server managed by an etcd lease
+    etcd_ha_service_working_directory: /opt/woodpecker
+    etcd_ha_service_exec_start: /usr/local/sbin/woodpecker-ha-control start
+    etcd_ha_service_exec_stop: /usr/local/sbin/woodpecker-ha-control stop
+    etcd_ha_healthcheck_command: "/usr/bin/curl --fail --silent http://127.0.0.1:{{ woodpecker.http_port }}/ >/dev/null"
+    etcd_ha_start_controller: false
+    woodpecker_version: "{{ woodpecker.version }}"
+    woodpecker_image: "{{ woodpecker.image }}:v{{ woodpecker.version }}"
+    woodpecker_external_url: "{{ woodpecker.external_url }}"
+    woodpecker_webhook_host: "{{ woodpecker.webhook_host }}"
+    woodpecker_forgejo_url: "{{ woodpecker.forgejo_url }}"
+    woodpecker_forgejo_client: "{{ woodpecker.forgejo_client }}"
+    woodpecker_admin: "{{ woodpecker.admin }}"
+    woodpecker_organization: "{{ woodpecker.organization }}"
+    woodpecker_http_port: "{{ woodpecker.http_port }}"
+    woodpecker_grpc_port: "{{ woodpecker.grpc_port }}"
+    woodpecker_database_host: "{{ woodpecker.database_host }}"
+    woodpecker_database_port: "{{ woodpecker.database_port }}"
+    woodpecker_database_name: "{{ woodpecker.database_name }}"
+    woodpecker_database_user: "{{ woodpecker.database_user }}"
+    woodpecker_config_extension_listen: "{{ woodpecker.config_extension.listen }}"
+    woodpecker_config_extension_endpoint: "{{ woodpecker.config_extension.endpoint }}"
+    woodpecker_config_extension_netrc: "{{ woodpecker.config_extension.netrc | default(true) }}"
+    woodpecker_secret_extension_endpoint: "{{ woodpecker.config_extension.secret_endpoint }}"
+    woodpecker_secret_extension_netrc: "{{ woodpecker.config_extension.secret_netrc | default(true) }}"
+    woodpecker_openbao_addr: "{{ woodpecker.config_extension.openbao.address }}"
+    woodpecker_openbao_auth_path: "{{ woodpecker.config_extension.openbao.auth_path }}"
+    woodpecker_openbao_cert_role: "{{ woodpecker.config_extension.openbao.cert_role }}"
+    woodpecker_openbao_ca_file: "{{ woodpecker.config_extension.openbao.ca_file }}"
+    woodpecker_openbao_cert_file: "{{ woodpecker.config_extension.openbao.cert_file }}"
+    woodpecker_openbao_key_file: "{{ woodpecker.config_extension.openbao.key_file }}"
+    woodpecker_openbao_allowed_repositories: "{{ woodpecker.config_extension.openbao.allowed_repositories }}"
+    woodpecker_forgejo_secret: "{{ lookup('env', 'WOODPECKER_FORGEJO_SECRET') }}"
+    woodpecker_agent_secret: "{{ lookup('env', 'WOODPECKER_AGENT_SECRET') }}"
+    woodpecker_grpc_secret: "{{ lookup('env', 'WOODPECKER_GRPC_SECRET') }}"
+    postgresql_woodpecker_password: "{{ lookup('env', 'POSTGRESQL_WOODPECKER_PASSWORD') }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+    - name: Build the Woodpecker server HA candidate group
+      ansible.builtin.group_by:
+        key: "{{ woodpecker_ha_group }}"
+      when: not inventory_hostname is match('^woodpecker-agent-')
+    - name: Determine whether Woodpecker HA is configured
+      ansible.builtin.set_fact:
+        woodpecker_ha_prepare: >-
+          {{ woodpecker_ha_backend in ['etcd', 'pacemaker'] }}
+    - name: Determine Woodpecker HA startup gating
+      ansible.builtin.set_fact:
+        woodpecker_ha_deferred: >-
+          {{ woodpecker_ha_backend == 'pacemaker' }}
+        woodpecker_managed_by_ha: >-
+          {{ woodpecker_ha_backend in ['etcd', 'pacemaker'] }}
+    - name: Configure Pacemaker HA during HA synchronization
+      ansible.builtin.include_role:
+        name: pacemaker_ha
+      when:
+        - woodpecker_ha_prepare | bool
+        - woodpecker_ha_backend == 'pacemaker'
+        - woodpecker_ha_sync | bool
+
+  roles:
+    - role: etcd_ha
+      when:
+        - woodpecker_ha_prepare | bool
+        - woodpecker_ha_backend == 'etcd'
+    - role: woodpecker_ha
+      when: woodpecker_ha_prepare | bool
+    - woodpecker_app
+    - monitoring_agent
+    - logging_agent
+  post_tasks:
+    - name: Start Woodpecker etcd HA controller after application configuration
+      ansible.builtin.systemd:
+        name: "{{ etcd_ha_controller_unit }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      when:
+        - woodpecker_ha_prepare | bool
+        - woodpecker_ha_backend == 'etcd'

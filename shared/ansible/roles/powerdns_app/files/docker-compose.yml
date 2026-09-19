@@ -1,0 +1,90 @@
+---
+services:
+  powerdns:
+    image: ${POWERDNS_IMAGE}
+    container_name: powerdns-auth
+    restart: unless-stopped
+    extra_hosts:
+      - "${POWERDNS_POSTGRESQL_HOST}:${POWERDNS_POSTGRESQL_ADDRESS}"
+    environment:
+      POWERDNS_API_KEY: ${POWERDNS_API_KEY}
+    entrypoint:
+      - /usr/bin/tini
+      - --
+      - /usr/local/sbin/pdns_server
+    command:
+      - --config-dir=/tmp/empty-pdns
+      - --disable-syslog
+      - --guardian=no
+      - --daemon=no
+      - --local-address=0.0.0.0
+      - --local-port=${POWERDNS_DNS_PORT}
+      - --launch=gpgsql
+      - --gpgsql-host=${POWERDNS_POSTGRESQL_HOST}
+      - --gpgsql-port=${POWERDNS_POSTGRESQL_PORT}
+      - --gpgsql-dbname=${POWERDNS_POSTGRESQL_DATABASE}
+      - --gpgsql-user=${POWERDNS_POSTGRESQL_USERNAME}
+      - --gpgsql-password=${POWERDNS_POSTGRESQL_PASSWORD}
+      - --api=yes
+      - --api-key=${POWERDNS_API_KEY}
+      - --webserver=yes
+      - --webserver-address=0.0.0.0
+      - --webserver-port=8081
+      - --webserver-allow-from=${POWERDNS_WEBSERVER_ALLOW_FROM}
+      - --allow-axfr-ips=${POWERDNS_AUTH_ALLOW_AXFR_IPS}
+      - --default-ttl=${POWERDNS_DEFAULT_TTL}
+      - --default-soa-edit=${POWERDNS_DEFAULT_SOA_EDIT}
+    ports:
+      - "${POWERDNS_LISTEN_ADDRESS}:${POWERDNS_DNS_PORT}:${POWERDNS_DNS_PORT}/tcp"
+      - "${POWERDNS_LISTEN_ADDRESS}:${POWERDNS_DNS_PORT}:${POWERDNS_DNS_PORT}/udp"
+      - "${POWERDNS_API_ADDRESS}:${POWERDNS_API_PORT}:8081/tcp"
+      - "${POWERDNS_API_ADDRESS}:${POWERDNS_RECURSOR_METRICS_PORT}:${POWERDNS_RECURSOR_METRICS_PORT}/tcp"
+      - "${POWERDNS_RECURSOR_LISTEN_ADDRESS}:${POWERDNS_RECURSOR_DNS_PORT}:${POWERDNS_RECURSOR_DNS_PORT}/tcp"
+      - "${POWERDNS_RECURSOR_LISTEN_ADDRESS}:${POWERDNS_RECURSOR_DNS_PORT}:${POWERDNS_RECURSOR_DNS_PORT}/udp"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "pdnsutil list-all-zones >/dev/null"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+  powerdns-recursor:
+    image: ${POWERDNS_RECURSOR_IMAGE}
+    container_name: powerdns-recursor
+    restart: unless-stopped
+    network_mode: service:powerdns
+    entrypoint:
+      - /usr/bin/tini
+      - --
+      - /usr/local/sbin/pdns_recursor
+    command:
+      - --enable-old-settings
+      - --config-dir=/tmp/empty-pdns-recursor
+      - --disable-syslog
+      - --daemon=no
+      - --local-address=0.0.0.0
+      - --local-port=${POWERDNS_RECURSOR_DNS_PORT}
+      - --allow-from=${POWERDNS_RECURSOR_ALLOW_FROM}
+      - --forward-zones=${POWERDNS_RECURSOR_FORWARD_ZONES}
+      - --forward-zones-recurse=${POWERDNS_RECURSOR_FORWARD_ZONES_RECURSE}
+      - --webserver=yes
+      - --webserver-address=0.0.0.0
+      - --webserver-port=${POWERDNS_RECURSOR_METRICS_PORT}
+      - --webserver-allow-from=${POWERDNS_WEBSERVER_ALLOW_FROM}
+    depends_on:
+      powerdns:
+        condition: service_healthy
+  dnsdist:
+    image: ${DNSDIST_IMAGE}
+    container_name: powerdns-dnsdist
+    restart: unless-stopped
+    ports:
+      - "${DNSDIST_LISTEN_ADDRESS}:${DNSDIST_DNS_PORT}:${DNSDIST_DNS_PORT}/tcp"
+      - "${DNSDIST_LISTEN_ADDRESS}:${DNSDIST_DNS_PORT}:${DNSDIST_DNS_PORT}/udp"
+    command:
+      - --config=/etc/dnsdist/dnsdist.conf
+    volumes:
+      - ./dnsdist.conf:/etc/dnsdist/dnsdist.conf:ro
+    depends_on:
+      - powerdns-recursor

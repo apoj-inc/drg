@@ -1,0 +1,122 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "up{job=\"grafana\"}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Grafana up",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 9,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "rate(process_cpu_seconds_total{job=\"grafana\"}[5m])",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Grafana process CPU",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 9,
+                "x": 15,
+                "y": 0
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "process_resident_memory_bytes{job=\"grafana\"}",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Grafana resident memory",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "sum by(router,code) (rate(traefik_router_requests_total{router=~\".*grafana.*\"}[5m]))",
+                    "legendFormat": "{{router}} {{code}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik requests by route/code",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by(le,router) (rate(traefik_router_request_duration_seconds_bucket{router=~\".*grafana.*\"}[5m])))",
+                    "legendFormat": "{{router}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik p95 latency",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "grafana",
+        "traefik"
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "title": "Grafana service",
+    "uid": "grafana-service",
+    "version": 1
+}

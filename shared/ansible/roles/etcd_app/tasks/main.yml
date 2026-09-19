@@ -1,0 +1,244 @@
+---
+- name: Validate etcd inputs
+  ansible.builtin.assert:
+    that:
+      - etcd_cluster_members_config | length >= 3
+      - (etcd_cluster_members_config | length) % 2 == 1
+      - etcd_client_port | int > 0
+      - etcd_peer_port | int > 0
+      - ansible_host | string | length > 0
+      - inventory_hostname in etcd_cluster_members_config
+    fail_msg: etcd requires an odd quorum of at least three configured members and the current host must be one of them.
+
+- name: Build etcd cluster member map
+  ansible.builtin.set_fact:
+    etcd_cluster_members: >-
+      {{
+        (etcd_cluster_members | default([])) +
+        [item ~ '=http://' ~ item ~ '.' ~ dns.zone ~ ':' ~ (etcd_peer_port | string)]
+      }}
+  loop: "{{ etcd_cluster_members_config | sort }}"
+
+- name: Stop any pre-existing etcd instance before package installation
+  ansible.builtin.systemd_service:
+    name: etcd
+    state: stopped
+  failed_when: false
+
+- name: Mask etcd before package installation
+  ansible.builtin.file:
+    src: /dev/null
+    dest: /etc/systemd/system/etcd.service
+    state: link
+
+- name: Reload systemd after masking etcd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Install etcd
+  ansible.builtin.apt:
+    name:
+      - etcd-server
+      - etcd-client
+    state: present
+    update_cache: true
+
+- name: Unmask etcd after package installation
+  ansible.builtin.systemd_service:
+    name: etcd
+    masked: false
+    daemon_reload: true
+
+- name: Remove the local FQDN loopback mapping
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s+.*$'
+    state: absent
+
+- name: Validate etcd member inventory addresses
+  ansible.builtin.assert:
+    that:
+      - item in hostvars
+      - hostvars[item].ansible_ip | default('') | string is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}$')
+    fail_msg: "Ansible inventory must provide ansible_ip (IPv4) for etcd member {{ item }}."
+  loop: "{{ etcd_cluster_members_config | sort }}"
+
+- name: Configure local etcd member host entries
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} MANAGED ETCD MEMBERS"
+    block: |
+      {% for member in etcd_cluster_members_config | sort %}
+      {{ hostvars[member].ansible_ip }} {{ member }} {{ member }}.{{ dns.zone }}
+      {% endfor %}
+
+- name: Detect an existing etcd data directory
+  ansible.builtin.stat:
+    path: "{{ etcd_data_dir }}/member"
+  register: etcd_existing_member_dir
+
+- name: Query existing etcd membership from configured members
+  ansible.builtin.command:
+    argv:
+      - etcdctl
+      - --endpoints
+      - "http://{{ item }}.{{ dns.zone }}:{{ etcd_client_port }}"
+      - member
+      - list
+  register: etcd_membership_probe
+  changed_when: false
+  failed_when: false
+  loop: "{{ etcd_cluster_members_config | reject('equalto', inventory_hostname) | list }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Select a reachable existing etcd cluster member
+  ansible.builtin.set_fact:
+    etcd_active_cluster_available: >-
+      {{
+        etcd_membership_probe.results
+        | selectattr('rc', 'equalto', 0)
+        | list
+        | length > 0
+      }}
+    etcd_membership_output: >-
+      {{
+        etcd_membership_probe.results
+        | selectattr('rc', 'equalto', 0)
+        | map(attribute='stdout')
+        | first
+        | default('')
+      }}
+    etcd_membership_endpoint: >-
+      {{
+        etcd_membership_probe.results
+        | selectattr('rc', 'equalto', 0)
+        | map(attribute='item')
+        | first
+        | default('')
+      }}
+
+- name: Record whether this host already belongs to the active etcd cluster
+  ansible.builtin.set_fact:
+    etcd_member_registered: >-
+      {{
+        etcd_active_cluster_available | bool and
+        (
+          etcd_membership_output
+          is search(', (started|unstarted), ' ~ inventory_hostname ~ ',')
+        )
+      }}
+
+- name: Refuse to bootstrap an unregistered etcd data directory
+  ansible.builtin.assert:
+    that:
+      - not (etcd_active_cluster_available | bool)
+        or (etcd_member_registered | bool)
+        or not etcd_existing_member_dir.stat.exists
+    fail_msg: >-
+      {{ inventory_hostname }} has local etcd data but is not a member of the
+      active cluster. Stop etcd, remove only {{ etcd_data_dir }}/member after
+      confirming it is an abandoned bootstrap, then rerun the playbook.
+
+- name: Add a new etcd member to the active cluster before starting it
+  ansible.builtin.command:
+    argv:
+      - etcdctl
+      - --endpoints
+      - "http://{{ etcd_membership_endpoint }}.{{ dns.zone }}:{{ etcd_client_port }}"
+      - member
+      - add
+      - "{{ inventory_hostname }}"
+      - --peer-urls
+      - "http://{{ inventory_hostname }}.{{ dns.zone }}:{{ etcd_peer_port }}"
+  register: etcd_member_add
+  changed_when: true
+  throttle: 1
+  when:
+    - etcd_active_cluster_available | bool
+    - not etcd_member_registered | bool
+    - not etcd_existing_member_dir.stat.exists
+
+- name: Store the join cluster definition returned by etcd
+  ansible.builtin.set_fact:
+    # etcdctl returns this value quoted; /etc/default/etcd adds the quotes.
+    etcd_join_initial_cluster: >-
+      {{
+        etcd_member_add.stdout_lines
+        | select('match', '^ETCD_INITIAL_CLUSTER=')
+        | first
+        | regex_replace('^ETCD_INITIAL_CLUSTER=', '')
+        | trim('"')
+      }}
+  when: etcd_member_add is changed
+
+- name: Select etcd initial cluster state
+  ansible.builtin.set_fact:
+    etcd_initial_cluster_state: >-
+      {{
+        'existing'
+        if (
+          etcd_existing_member_dir.stat.exists or
+          (etcd_member_add is changed) or
+          (
+            etcd_active_cluster_available | bool and
+            etcd_member_registered | bool
+          )
+        )
+        else 'new'
+      }}
+
+- name: Configure etcd defaults
+  ansible.builtin.copy:
+    dest: /etc/default/etcd
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      ETCD_NAME="{{ inventory_hostname }}"
+      ETCD_DATA_DIR="{{ etcd_data_dir }}"
+      ETCD_LISTEN_PEER_URLS="http://{{ etcd_listen_address }}:{{ etcd_peer_port }}"
+      ETCD_LISTEN_CLIENT_URLS="http://{{ etcd_listen_address }}:{{ etcd_client_port }}"
+      ETCD_ADVERTISE_CLIENT_URLS="http://{{ inventory_hostname }}.{{ dns.zone }}:{{ etcd_client_port }}"
+      ETCD_INITIAL_ADVERTISE_PEER_URLS="http://{{ inventory_hostname }}.{{ dns.zone }}:{{ etcd_peer_port }}"
+      ETCD_INITIAL_CLUSTER="{{ etcd_join_initial_cluster | default(etcd_cluster_members | join(','), true) }}"
+      ETCD_INITIAL_CLUSTER_TOKEN="{{ etcd_initial_cluster_token }}"
+      ETCD_INITIAL_CLUSTER_STATE="{{ etcd_initial_cluster_state }}"
+      ETCD_ENABLE_V2="true"
+  notify: Restart etcd
+
+- name: Ensure etcd is enabled and running
+  ansible.builtin.service:
+    name: etcd
+    state: started
+    enabled: true
+
+- name: Apply etcd configuration before health check
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify etcd endpoint health
+  ansible.builtin.command:
+    argv:
+      - etcdctl
+      - --endpoints
+      - "http://127.0.0.1:{{ etcd_client_port }}"
+      - endpoint
+      - health
+  changed_when: false
+
+- name: Mark healthy etcd node as eligible for canonical DNS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../../../shared/scripts/reconcile_service_dns.py"
+      - mark-eligible
+      - --config
+      - "{{ playbook_dir }}/../config.yaml"
+      - --hostname
+      - "{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  environment:
+    NETBOX_API: "{{ lookup('env', 'NETBOX_API') }}"
+    NETBOX_TOKEN: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+    NETBOX_VALIDATE_CERTS: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') }}"

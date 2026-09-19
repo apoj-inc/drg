@@ -1,0 +1,58 @@
+---
+# Kolla-Ansible 2026.1 single-node baseline.
+# Copy/render passwords.yml outside Git (OpenBao is the source of secrets).
+
+openstack_release: "2026.1"
+kolla_base_distro: "debian"
+kolla_install_type: "binary"
+
+# Reserved internal VIP for the single-node Kolla control plane.
+kolla_internal_vip_address: "192.0.2.5"
+network_interface: "br0"
+neutron_external_interface: "veth-neutron"
+
+enable_haproxy: "yes"
+enable_keepalived: "yes"
+enable_keystone: "yes"
+enable_keystone_federation: "no"
+keystone_federation_oidc_response_type: "code"
+keystone_federation_oidc_forwarded_headers: "X-Forwarded-Proto X-Forwarded-Host X-Forwarded-Port"
+enable_neutron: "yes"
+neutron_plugin_agent: "ovn"
+enable_neutron_provider_networks: "yes"
+enable_nova: "yes"
+nova_compute_virt_type: "kvm"
+enable_glance: "yes"
+enable_heat: "no"
+enable_cinder: "yes"
+enable_cinder_backend_lvm: "yes"
+enable_horizon: "yes"
+enable_skyline: "yes"
+skyline_enable_sso: "yes"
+enable_octavia: "no"
+
+# Internal-only test endpoints. Public DNS and CI are out of scope for this stage.
+kolla_external_fqdn: "openstack.example.test"
+public_protocol: "https"
+# TLS is terminated by the internal Traefik proxy; keep Keystone's backend
+# listener on 5000 while publishing the browser-facing URL on HTTPS/443.
+keystone_public_url: "https://openstack.example.test"
+# Skyline's /api/v1/sso endpoint exposes this URL to the browser.
+skyline_keystone_url: "https://openstack.example.test/v3/"
+horizon_external_fqdn: "horizon.example.test"
+horizon_public_endpoint: "https://horizon.example.test"
+skyline_external_fqdn: "skyline.example.test"
+# Kolla builds the Skyline WebSSO trusted-dashboard URL from this variable.
+skyline_console_external_fqdn: "skyline.example.test"
+# TLS is terminated by Traefik; the browser-facing WebSSO origin is 443.
+skyline_console_public_endpoint: "https://skyline.example.test"
+
+# Enable Keystone federation only after supplying provider metadata and an
+# attribute mapping through a private deployment overlay.
+
+# Must point to the reviewed physical VG; do not use loopback storage.
+cinder_volume_group: "cinder-volumes"
+
+# Keep control-plane resources protected from Nova workloads.
+nova_cpu_allocation_ratio: 1.0
+nova_ram_allocation_ratio: 1.0

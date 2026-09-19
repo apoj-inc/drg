@@ -1,0 +1,12 @@
+---
+- name: Restart Traefik
+  community.docker.docker_compose_v2:
+    project_src: "{{ traefik_compose_dir }}"
+    state: present
+    recreate: always
+
+- name: Reload Traefik
+  ansible.builtin.command: docker compose exec -T traefik traefik healthcheck --ping
+  args:
+    chdir: "{{ traefik_compose_dir }}"
+  changed_when: false

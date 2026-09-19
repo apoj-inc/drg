@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${MODEL_ID:?}" "${SERVED_MODEL_NAME:?}" "${VLLM_DEVICE_IDS:?}"
+: "${PIPELINE_PARALLEL_SIZE:?}" "${TENSOR_PARALLEL_SIZE:?}"
+: "${MAX_MODEL_LEN:?}" "${MAX_NUM_SEQS:?}" "${MAX_NUM_BATCHED_TOKENS:?}"
+: "${GPU_MEMORY_UTILIZATION:?}" "${VLLM_HOST:?}" "${VLLM_PORT:?}"
+: "${VLLM_NUMA_NODE:?}"
+
+vllm={{ llm_venv }}/bin/vllm
+help="$($vllm serve --help=all 2>&1)"
+required_flags=(
+  --device-ids --pipeline-parallel-size --tensor-parallel-size
+  --language-model-only --reasoning-parser --mamba-cache-dtype
+  --mamba-ssm-cache-dtype
+)
+for flag in "${required_flags[@]}"; do
+  grep -q -- "$flag" <<<"$help" || {
+    echo "vLLM {{ llm_vllm_version }} does not expose required option $flag" >&2
+    exit 2
+  }
+done
+
+# Tool calling is an optional follow-up capability.  Do not prevent the
+# baseline text/reasoning server from starting when a vLLM build lacks the
+# parser flags or this parser name.
+tool_args=()
+if grep -q -- '--tool-call-parser' <<<"$help" \
+  && grep -q -- '--enable-auto-tool-choice' <<<"$help" \
+  && grep -q -- 'qwen3_xml' <<<"$help"; then
+  tool_args=(--tool-call-parser qwen3_xml --enable-auto-tool-choice)
+fi
+
+exec numactl --cpunodebind="$VLLM_NUMA_NODE" --membind="$VLLM_NUMA_NODE" \
+  "$vllm" serve "$MODEL_ID" \
+  --served-model-name "$SERVED_MODEL_NAME" \
+  --host "$VLLM_HOST" \
+  --port "$VLLM_PORT" \
+  --device-ids "$VLLM_DEVICE_IDS" \
+  --pipeline-parallel-size "$PIPELINE_PARALLEL_SIZE" \
+  --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
+  --distributed-executor-backend mp \
+  --quantization gptq \
+  --dtype float16 \
+  --max-model-len "$MAX_MODEL_LEN" \
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" \
+  --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+  --mamba-cache-dtype auto \
+  --mamba-ssm-cache-dtype auto \
+  --language-model-only \
+  --reasoning-parser qwen3 \
+  "${tool_args[@]}"

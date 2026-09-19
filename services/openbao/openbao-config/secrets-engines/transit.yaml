@@ -1,0 +1,4 @@
+---
+mount: transit
+type: transit
+description: Reserved for application encryption. No consumer policies are granted yet.

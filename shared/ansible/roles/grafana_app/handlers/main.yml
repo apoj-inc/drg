@@ -1,0 +1,42 @@
+---
+- name: Restart Grafana
+  ansible.builtin.systemd:
+    name: grafana-server
+    state: restarted
+    daemon_reload: true
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Recreate Prometheus
+  community.docker.docker_compose_v2:
+    project_src: "{{ grafana_compose_dir }}"
+    services:
+      - prometheus
+    state: present
+    recreate: always
+
+- name: Recreate Loki
+  community.docker.docker_compose_v2:
+    project_src: "{{ grafana_compose_dir }}"
+    services:
+      - loki
+    state: present
+    recreate: always
+
+- name: Recreate Grafana container
+  community.docker.docker_compose_v2:
+    project_src: "{{ grafana_compose_dir }}"
+    services:
+      - grafana
+    state: present
+    recreate: always
+
+- name: Recreate Proxmox exporter
+  community.docker.docker_compose_v2:
+    project_src: "{{ grafana_compose_dir }}"
+    services:
+      - pve-exporter
+    state: present
+    recreate: always

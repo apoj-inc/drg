@@ -1,0 +1,18 @@
+complete:{{ job.service }}:{{ job.contour }}:
+  stage: configure_{{ job.contour | lower }}
+  tags:
+    - {{ job.rollout_target_tag }}
+  environment:
+    name: "{{ deploy_environment }}/{{ job.service }}/{{ job.contour }}"
+  script:
+    - echo "Rollout contour {{ job.contour }} for {{ job.service }} completed."
+  when: manual
+  allow_failure: false
+  needs:
+{% for need in job.completion_needs %}
+    - job: {{ need }}
+{% endfor %}
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

@@ -1,0 +1,8 @@
+[Unit]
+Description=Recover the PowerDNS Recursor when its health endpoint fails
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/powerdns-recursor-watchdog

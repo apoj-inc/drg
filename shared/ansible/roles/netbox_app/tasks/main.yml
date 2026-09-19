@@ -1,0 +1,45 @@
+---
+- name: Validate NetBox secrets
+  ansible.builtin.assert:
+    that:
+      - netbox_api_token_pepper | string | length > 0
+    fail_msg: NETBOX_API_TOKEN_PEPPER must be provided through a protected secret.
+  no_log: true
+
+- name: Install NetBox prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Configure NetBox
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Deploy NetBox
+  ansible.builtin.import_tasks: deploy.yml
+  tags:
+    - deploy
+
+- name: Bootstrap NetBox token
+  ansible.builtin.import_tasks: token.yml
+  tags:
+    - bootstrap
+    - token
+    - superuser
+
+- name: Restart NetBox explicitly
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: restart.yml
+  vars:
+    compose_app_root: "{{ netbox_compose_dir }}"
+  tags:
+    - never
+    - restart
+
+- name: Check NetBox health
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck

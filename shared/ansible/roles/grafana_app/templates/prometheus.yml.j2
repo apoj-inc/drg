@@ -1,0 +1,231 @@
+global:
+  scrape_interval: {{ grafana_prometheus_scrape_interval }}
+  evaluation_interval: {{ grafana_prometheus_scrape_interval }}
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [prometheus:9090]
+
+  - job_name: node
+    static_configs:
+{% for host in groups['all'] | sort if hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:9100"]
+        labels:
+          instance: "{{ host }}"
+          service: "{{ host.split('-')[0] }}"
+{% endfor %}
+
+  - job_name: redis
+    metrics_path: /scrape
+    static_configs:
+      - targets:
+{% for host in groups['all'] | sort if host.startswith('redis') and hostvars[host].ansible_host is defined %}
+          - redis://{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:6379
+{% endfor %}
+        labels: {service: redis}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: redis-exporter:9121
+
+  - job_name: redis-exporter
+    static_configs:
+      - targets: [redis-exporter:9121]
+        labels: {service: redis}
+
+  - job_name: etcd
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('etcd') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ etcd_client_port | default(2379) }}"]
+        labels: {instance: "{{ host }}", service: etcd}
+{% endfor %}
+
+  - job_name: openbao
+    metrics_path: /v1/sys/metrics
+    params: {format: [prometheus]}
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('openbao') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:8200"]
+        labels: {instance: "{{ host }}", service: openbao}
+{% endfor %}
+
+  - job_name: traefik
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('traefik') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:8082"]
+        labels: {instance: "{{ host }}", service: traefik}
+{% endfor %}
+
+  - job_name: grafana
+    static_configs:
+      - targets: [grafana:3000]
+        labels: {service: grafana}
+
+  - job_name: keycloak
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('keycloak') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ grafana_keycloak_metrics_port }}"]
+        labels: {instance: "{{ host }}", service: keycloak}
+{% endfor %}
+
+  - job_name: oauth2-proxy
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('oauth2-proxy') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ grafana_oauth2_proxy_metrics_port }}"]
+        labels: {instance: "{{ host }}", service: oauth2-proxy}
+{% endfor %}
+
+  - job_name: freeipa-http
+    metrics_path: /probe
+    params: {module: [http_2xx_insecure]}
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('freeipa') and hostvars[host].ansible_host is defined %}
+      - targets: ["https://{{ host }}:443/ipa/ui/"]
+        labels: {service: freeipa, replica: "{{ host }}"}
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [replica]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: freeipa-ldap
+    metrics_path: /probe
+    params: {module: [tcp_connect]}
+    static_configs:
+      - targets:
+{% for host in groups['all'] | sort if host.startswith('freeipa') and hostvars[host].ansible_host is defined %}
+          - "{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:389"
+{% endfor %}
+        labels: {service: freeipa, component: ldap}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: freeipa-ldaps
+    metrics_path: /probe
+    params: {module: [tcp_connect]}
+    static_configs:
+      - targets:
+{% for host in groups['all'] | sort if host.startswith('freeipa') and hostvars[host].ansible_host is defined %}
+          - "{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:636"
+{% endfor %}
+        labels: {service: freeipa, component: ldaps}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: freeipa-kerberos
+    metrics_path: /probe
+    params: {module: [tcp_connect]}
+    static_configs:
+      - targets:
+{% for host in groups['all'] | sort if host.startswith('freeipa') and hostvars[host].ansible_host is defined %}
+          - "{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:88"
+{% endfor %}
+        labels: {service: freeipa, component: kerberos}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: forgejo
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials: {{ grafana_forgejo_metrics_token | to_json }}
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('forgejo') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ grafana_forgejo_metrics_port }}"]
+        labels: {instance: "{{ host }}", service: forgejo}
+{% endfor %}
+
+  - job_name: dockerhub
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('dockerhub') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ grafana_dockerhub_metrics_port }}"]
+        labels: {instance: "{{ host }}", service: dockerhub}
+{% endfor %}
+
+  - job_name: powerdns-authoritative
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('powerdns') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ grafana_powerdns_authoritative_metrics_port }}"]
+        labels: {instance: "{{ host }}", service: powerdns, component: authoritative}
+{% endfor %}
+
+  - job_name: powerdns-recursor
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('powerdns') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ grafana_powerdns_recursor_metrics_port }}"]
+        labels: {instance: "{{ host }}", service: powerdns, component: recursor}
+{% endfor %}
+
+  - job_name: postgresql
+    static_configs:
+      - targets: [postgres-exporter:9187]
+        labels: {service: postgresql}
+
+  - job_name: patroni
+    metrics_path: /metrics
+    static_configs:
+{% for host in groups['all'] | sort if host.startswith('postgresql') and hostvars[host].ansible_host is defined %}
+      - targets: ["{{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:{{ postgresql_patroni_restapi_port | default(8008) }}"]
+        labels: {instance: "{{ host }}", service: postgresql, cluster: "{{ postgresql_patroni_scope | default('drg-postgresql') }}"}
+{% endfor %}
+
+  - job_name: pve
+    metrics_path: /pve
+    params:
+      module: [default]
+      cluster: ['1']
+      node: ['1']
+    static_configs:
+      - targets: ["{{ grafana_proxmox_target }}"]
+        labels: {service: proxmox}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: pve-exporter:9221
+
+  - job_name: blackbox-https
+    metrics_path: /probe
+    params: {module: [http_2xx]}
+    static_configs:
+      - targets:
+{% for target in grafana_blackbox_targets %}
+          - {{ target }}
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

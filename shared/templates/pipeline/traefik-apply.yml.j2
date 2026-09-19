@@ -1,0 +1,23 @@
+traefik-apply:
+  stage: traefik_apply
+  extends: .ansible_configure
+{% set openbao_secret_job = "ansible" %}
+{% include "openbao-secrets.yml.j2" %}
+  environment:
+    name: "{{ deploy_environment }}/traefik"
+  variables:
+    SERVICE: traefik
+    DEPLOY_ENVIRONMENT: "{{ deploy_environment }}"
+    ENVIRONMENT: "{{ deploy_environment }}"
+    ANSIBLE_ENVIRONMENT: "{{ deploy_environment }}"
+    TF_VAR_environment: "{{ deploy_environment }}"
+    NETBOX_API: "{{ job.netbox_api }}"
+    PLAYBOOK: services/traefik/ansible/traefik-config.yml
+    ANSIBLE_LIMIT: all
+{% include "openbao-variables.yml.j2" %}
+  needs:
+    - job: approve-traefik
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

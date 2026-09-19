@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: grafana_app
+  author: repository
+  description: Install and configure Grafana CE lifecycle tasks
+  license: internal
+  min_ansible_version: "2.14"
+
+dependencies:
+  - role: debian_mirrors

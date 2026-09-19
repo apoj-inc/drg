@@ -1,0 +1,24 @@
+[Unit]
+Description=Woodpecker dynamic configuration extension
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ woodpecker_config_extension_binary }}
+Environment=WOODPECKER_EXTENSION_LISTEN={{ woodpecker_config_extension_listen }}
+Environment=WOODPECKER_EXTENSION_PUBLIC_KEY_FILE={{ woodpecker_config_extension_public_key_file }}
+Environment=DRG_WOODPECKER_GENERATOR={{ woodpecker_config_extension_dir }}/generate_woodpecker.py
+Environment=DRG_FORGEJO_HOST=forge.example.test
+Environment=DRG_OPENBAO_ADDR={{ woodpecker_openbao_addr }}
+Environment=DRG_OPENBAO_AUTH_PATH={{ woodpecker_openbao_auth_path }}
+Environment=DRG_OPENBAO_CERT_ROLE={{ woodpecker_openbao_cert_role }}
+Environment=DRG_OPENBAO_CA_FILE={{ woodpecker_openbao_ca_file }}
+Environment=DRG_OPENBAO_CERT_FILE={{ woodpecker_openbao_cert_file }}
+Environment=DRG_OPENBAO_KEY_FILE={{ woodpecker_openbao_key_file }}
+Environment=DRG_OPENBAO_ALLOWED_REPOSITORIES={{ woodpecker_openbao_allowed_repositories }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

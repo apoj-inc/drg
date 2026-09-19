@@ -1,0 +1,10 @@
+bind {{ redis_listen_address }}
+protected-mode no
+port {{ redis_sentinel_port }}
+dir {{ redis_sentinel_data_dir }}
+
+sentinel monitor {{ redis_master_name }} {{ redis_master_address }} {{ redis_port }} {{ redis_quorum }}
+sentinel down-after-milliseconds {{ redis_master_name }} {{ redis_down_after_milliseconds }}
+sentinel failover-timeout {{ redis_master_name }} {{ redis_failover_timeout }}
+sentinel parallel-syncs {{ redis_master_name }} {{ redis_parallel_syncs }}
+sentinel auth-pass {{ redis_master_name }} {{ redis_password }}

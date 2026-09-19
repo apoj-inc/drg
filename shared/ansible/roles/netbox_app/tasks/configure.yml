@@ -1,0 +1,51 @@
+---
+- name: Render Docker Compose project environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ netbox_compose_dir }}/.env"
+    mode: "0644"
+  notify: Restart NetBox
+
+- name: Render NetBox plugin requirements
+  ansible.builtin.template:
+    src: local_requirements.txt.j2
+    dest: "{{ netbox_compose_dir }}/local_requirements.txt"
+    mode: "0644"
+  notify: Restart NetBox
+
+- name: Render NetBox plugin configuration
+  ansible.builtin.template:
+    src: plugins.py.j2
+    dest: "{{ netbox_compose_dir }}/plugins.py"
+    mode: "0644"
+  notify: Restart NetBox
+
+- name: Copy NetBox custom image Dockerfile
+  ansible.builtin.copy:
+    src: Dockerfile
+    dest: "{{ netbox_compose_dir }}/Dockerfile"
+    mode: "0644"
+  notify: Restart NetBox
+
+- name: Render NetBox application environment
+  ansible.builtin.template:
+    src: netbox.env.j2
+    dest: "{{ netbox_compose_dir }}/env/netbox.env"
+    mode: "0600"
+  register: netbox_app_env_result
+  no_log: true
+  notify: Restart NetBox
+
+- name: Copy full Docker Compose file
+  ansible.builtin.copy:
+    src: docker-compose.yml
+    dest: "{{ netbox_compose_dir }}/docker-compose.yml"
+    mode: "0644"
+  notify: Restart NetBox
+
+- name: Validate NetBox Docker Compose file
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: validate.yml
+  vars:
+    compose_app_root: "{{ netbox_compose_dir }}"

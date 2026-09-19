@@ -1,0 +1,30 @@
+---
+services:
+  traefik:
+    image: ${TRAEFIK_IMAGE}
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SELECTELV2_ACCOUNT_ID: "${SELECTELV2_ACCOUNT_ID}"
+      SELECTELV2_PROJECT_ID: "${SELECTELV2_PROJECT_ID}"
+      SELECTELV2_USERNAME: "${SELECTELV2_USERNAME}"
+      SELECTELV2_PASSWORD: "${SELECTELV2_PASSWORD}"
+    volumes:
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./config:/etc/traefik/config:ro
+      - ./certs/acme.json:/acme.json
+      - ./logs:/var/log/traefik
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    network_mode: host
+    healthcheck:
+      test:
+        - CMD
+        - traefik
+        - healthcheck
+        - --ping
+      interval: 30s
+      timeout: 10s
+      retries: 5

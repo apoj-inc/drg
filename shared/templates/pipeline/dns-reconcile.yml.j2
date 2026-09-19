@@ -1,0 +1,39 @@
+dns-reconcile:{{ job.job_id }}:
+  stage: {{ job.dns_stage | default("configure_" ~ (job.deployment_contour | lower) if job.deployment_contour else "configure") }}
+{% if job.rollout_target_tag %}
+  tags:
+    - {{ job.rollout_target_tag }}
+{% endif %}
+{% set openbao_secret_job = "ansible" %}
+{% include "openbao-secrets.yml.j2" %}
+  environment:
+    name: "{{ deploy_environment }}/{{ job.environment_name }}"
+  variables:
+    NETBOX_API: "{{ job.netbox_api }}"
+{% include "openbao-variables.yml.j2" %}
+{% if job.traefik_dns_targets is defined %}
+    TRAEFIK_DNS_TARGETS: "{{ job.traefik_dns_targets | default([]) | join(',') }}"
+{% endif %}
+  before_script:
+    - python3 -c "import yaml"
+    - |
+      if [ -n "${OPENBAO_SECRET_SPECS:-}" ]; then
+        openbao_env="$(mktemp)"
+        python3 shared/scripts/load_openbao_secrets.py "$openbao_env"
+        . "$openbao_env"
+        rm -f "$openbao_env"
+      fi
+    - test -n "${NETBOX_API:-}"
+    - test -n "${NETBOX_TOKEN:-}"
+  script:
+    - >-
+      python3 shared/scripts/reconcile_service_dns.py reconcile
+      --config "services/{{ job.service }}/config.yaml"
+  needs:
+{% for need in job.dns_needs | default(["configure:" ~ job.job_id]) %}
+    - job: {{ need }}
+{% endfor %}
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

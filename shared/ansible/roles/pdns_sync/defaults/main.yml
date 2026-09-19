@@ -1,0 +1,33 @@
+---
+pdns_sync_compose_dir: /opt/octodns
+pdns_sync_legacy_compose_dir: /opt/netbox-pdns
+pdns_sync_zone: example.test.
+pdns_sync_powerdns_host: 127.0.0.1
+pdns_sync_powerdns_port: 8081
+pdns_sync_netbox_url: >-
+  {{ lookup('env', 'NETBOX_API') | default('', true) }}
+pdns_sync_netbox_token: >-
+  {{ lookup('env', 'NETBOX_TOKEN') | default('', true) }}
+pdns_sync_netbox_validate_certs: >-
+  {{ lookup('env', 'NETBOX_VALIDATE_CERTS') | default('true', true) | bool }}
+pdns_sync_powerdns_api_key: >-
+  {{ lookup('env', 'POWERDNS_API_KEY') | default('', true) }}
+
+# Only the A replica performs mutations. Both PowerDNS instances use the same
+# PostgreSQL backend, so concurrent writers are neither needed nor safe.
+pdns_sync_controller_contour: A
+pdns_sync_is_controller: >-
+  {{
+    ('tags_contour_' ~ (pdns_sync_controller_contour | lower)) in group_names
+    or ('tag_contour_' ~ (pdns_sync_controller_contour | lower)) in group_names
+    or ('tags_contour-' ~ (pdns_sync_controller_contour | lower)) in group_names
+    or ('tag_contour-' ~ (pdns_sync_controller_contour | lower)) in group_names
+    or (
+      (inventory_hostname | lower)
+      is match('^powerdns-.+-' ~ (pdns_sync_controller_contour | lower) ~ '-[0-9]+$')
+    )
+  }}
+
+# The dedicated DNS apply job reconciles DNS. Only the contour A controller
+# calls the PowerDNS API; the B replica never mutates shared DNS state.
+pdns_sync_apply: true

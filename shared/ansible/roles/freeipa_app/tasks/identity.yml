@@ -1,0 +1,148 @@
+---
+- name: Load FreeIPA identity declaration
+  ansible.builtin.include_vars:
+    file: "{{ freeipa_identity_file }}"
+    name: freeipa_identity_document
+
+- name: Backup FreeIPA before an explicit object deletion
+  ansible.builtin.command: ipa-backup --data --online
+  register: freeipa_iac_backup
+  changed_when: true
+  no_log: true
+  when: >-
+    (
+      (freeipa_identity_document.groups | default([])) +
+      (freeipa_identity_document.roles | default([])) +
+      (freeipa_identity_document.hostgroups | default([])) +
+      (freeipa_identity_document.users | default([])) +
+      (freeipa_identity_document.hosts | default([])) +
+      (freeipa_identity_document.services | default([])) +
+      (freeipa_identity_document.hbac_rules | default([])) +
+      (freeipa_identity_document.sudo_rules | default([]))
+    ) | selectattr('state', 'defined') |
+    selectattr('state', 'equalto', 'absent') | list | length > 0
+
+- name: Reconcile declared FreeIPA groups
+  freeipa.ansible_freeipa.ipagroup:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    description: "{{ item.description | default(omit) }}"
+  loop: "{{ freeipa_identity_document.groups | default([]) }}"
+  no_log: true
+
+- name: Reconcile declared FreeIPA roles
+  freeipa.ansible_freeipa.iparole:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    description: "{{ item.description | default(omit) }}"
+  loop: "{{ freeipa_identity_document.roles | default([]) }}"
+  no_log: true
+
+- name: Reconcile declared FreeIPA role members and privileges
+  freeipa.ansible_freeipa.iparole:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: present
+    action: member
+    user: "{{ item.user | default(omit) }}"
+    group: "{{ item.group | default(omit) }}"
+    host: "{{ item.host | default(omit) }}"
+    hostgroup: "{{ item.hostgroup | default(omit) }}"
+    privilege: "{{ item.privilege | default(omit) }}"
+  loop: "{{ freeipa_identity_document.roles | default([]) }}"
+  when:
+    - item.state | default('present') == 'present'
+    - item.user is defined or item.group is defined or item.host is defined or item.hostgroup is defined or item.privilege is defined
+  no_log: true
+
+- name: Reconcile declared FreeIPA host groups
+  freeipa.ansible_freeipa.ipahostgroup:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    description: "{{ item.description | default(omit) }}"
+    host: "{{ item.host | default(omit) }}"
+  loop: "{{ freeipa_identity_document.hostgroups | default([]) }}"
+  no_log: true
+
+- name: Validate passwords for declared users
+  ansible.builtin.assert:
+    that:
+      - lookup('env', item.password_env) | length > 0
+    fail_msg: >-
+      The password environment variable {{ item.password_env }} is not set for
+      FreeIPA user {{ item.name }}.
+  loop: "{{ freeipa_identity_document.users | default([]) }}"
+  when: item.password_env is defined
+  no_log: true
+
+- name: Reconcile declared FreeIPA users
+  freeipa.ansible_freeipa.ipauser:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    givenname: "{{ item.givenname | default(omit) }}"
+    sn: "{{ item.sn | default(omit) }}"
+    password: >-
+      {{ lookup('env', item.password_env) if item.password_env is defined else omit }}
+    passwordexpiration: "{{ item.password_expiration | default(omit) }}"
+  loop: "{{ freeipa_identity_document.users | default([]) }}"
+  no_log: true
+
+- name: Reconcile declared FreeIPA hosts
+  freeipa.ansible_freeipa.ipahost:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    force: "{{ item.force | default(false) }}"
+  loop: "{{ freeipa_identity_document.hosts | default([]) }}"
+  no_log: true
+
+- name: Reconcile declared FreeIPA service principals
+  freeipa.ansible_freeipa.ipaservice:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    force: "{{ item.force | default(false) }}"
+  loop: "{{ freeipa_identity_document.services | default([]) }}"
+  no_log: true
+
+- name: Reconcile declared FreeIPA HBAC rules
+  freeipa.ansible_freeipa.ipahbacrule:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    description: "{{ item.description | default(omit) }}"
+    host: "{{ item.host | default(omit) }}"
+    hostgroup: "{{ item.hostgroup | default(omit) }}"
+    user: "{{ item.user | default(omit) }}"
+    group: "{{ item.usergroup | default(omit) }}"
+    hbacsvc: "{{ item.service | default(omit) }}"
+  loop: "{{ freeipa_identity_document.hbac_rules | default([]) }}"
+  no_log: true
+
+- name: Reconcile declared FreeIPA sudo rules
+  freeipa.ansible_freeipa.ipasudorule:
+    ipaadmin_password: "{{ freeipa_admin_password }}"
+    ipaadmin_principal: admin
+    name: "{{ item.name }}"
+    state: "{{ item.state | default('present') }}"
+    description: "{{ item.description | default(omit) }}"
+    user: "{{ item.user | default(omit) }}"
+    group: "{{ item.usergroup | default(omit) }}"
+    host: "{{ item.host | default(omit) }}"
+    hostgroup: "{{ item.hostgroup | default(omit) }}"
+    cmdcategory: "{{ 'all' if item.command | default('') == 'ALL' else omit }}"
+    sudooption: "{{ item.sudo_options | default(['!authenticate']) }}"
+  loop: "{{ freeipa_identity_document.sudo_rules | default([]) }}"
+  no_log: true

@@ -1,0 +1,14 @@
+---
+- name: Validate NetBox DNS export settings
+  ansible.builtin.assert:
+    that:
+      - dns_sync_netbox_api_url | length > 0
+      - dns_sync_netbox_token | length > 0
+      - dns_sync_netbox_zones_endpoint | length > 0
+      - dns_sync_netbox_records_endpoint | length > 0
+    fail_msg: NetBox API URL, token, zones endpoint, and records endpoint are required for DNS sync.
+  no_log: true
+- name: Normalize NetBox DNS export settings
+  ansible.builtin.set_fact:
+    dns_sync_netbox_base_url: "{{ dns_sync_netbox_api_url | regex_replace('/+$', '') }}"
+    dns_sync_netbox_verify_tls: "{{ dns_sync_netbox_validate_certs | bool }}"

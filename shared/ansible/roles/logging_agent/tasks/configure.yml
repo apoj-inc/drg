@@ -1,0 +1,55 @@
+---
+- name: Remember whether Loki URL was provided explicitly
+  ansible.builtin.set_fact:
+    logging_agent_loki_url_explicit: "{{ logging_agent_loki_url | length > 0 }}"
+
+- name: Discover Loki host from Grafana inventory
+  ansible.builtin.set_fact:
+    logging_agent_loki_url: >-
+      http://{{ hostvars[groups['tags_grafana'][0]].ansible_host }}:{{
+      logging_agent_loki_port }}/loki/api/v1/push
+  when:
+    - logging_agent_loki_url | length == 0
+    - groups['tags_grafana'] | default([]) | length > 0
+    - hostvars[groups['tags_grafana'][0]].ansible_host is defined
+
+- name: Validate logging destination
+  ansible.builtin.assert:
+    that:
+      - logging_agent_loki_url | length > 0
+      - >-
+        logging_agent_loki_url_explicit | bool or
+        (
+          groups['tags_grafana'] | default([]) | length > 0 and
+          hostvars[groups['tags_grafana'][0]].ansible_host is defined
+        )
+    fail_msg: >-
+      The Loki URL must be set explicitly or NetBox inventory must contain a
+      tags_grafana host with ansible_host.
+
+- name: Render Alloy configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: "{{ logging_agent_config_path }}"
+    owner: root
+    group: alloy
+    mode: "0640"
+  notify: Restart Alloy
+
+- name: Validate Alloy configuration
+  ansible.builtin.command:
+    argv:
+      - alloy
+      - validate
+      - "{{ logging_agent_config_path }}"
+  changed_when: false
+
+- name: Enable and start Alloy
+  ansible.builtin.systemd:
+    name: "{{ logging_agent_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply pending Alloy restart before validation
+  ansible.builtin.meta: flush_handlers

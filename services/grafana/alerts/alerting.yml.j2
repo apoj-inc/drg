@@ -1,0 +1,188 @@
+# Grafana Alerting provisioning.
+# Rules are kept as code so changes are reviewed together with infrastructure.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: grafana-telegram
+    receivers:
+      - uid: grafana-telegram
+        type: telegram
+        settings:
+          bottoken: $GRAFANA_TELEGRAM_BOT_TOKEN
+          chatid: $GRAFANA_TELEGRAM_CHAT_ID
+          message: |
+            {{ "{{" }} template "default.message" . {{ "}}" }}
+        disableResolveMessage: false
+policies:
+  - orgId: 1
+    receiver: grafana-telegram
+    group_by: ['...']
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+groups:
+  - orgId: 1
+    name: platform
+    folder: Platform
+    interval: 1m
+    rules:
+      # A scrape target must remain reachable.
+      - uid: target-down
+        title: Prometheus target is down
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'up == 0', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: sum}, type: query}]}
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: 'Prometheus target {{ "{{" }} $labels.instance {{ "}}" }} is down'}
+      # Patroni must expose exactly one leader for the cluster.
+      - uid: patroni-primary-count
+        title: Patroni cluster must have exactly one primary
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'sum by(scope) (patroni_primary{job="patroni"}) != 1', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: sum}, type: query}]}
+        for: 2m
+        labels: {severity: critical, service: postgresql}
+        annotations: {summary: 'Patroni cluster {{ "{{" }} $labels.scope {{ "}}" }} has invalid primary count'}
+      # Patroni reports whether PostgreSQL itself is running.
+      - uid: patroni-postgres-not-running
+        title: Patroni-managed PostgreSQL is not running
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'patroni_postgres_running{job="patroni"} == 0', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: sum}, type: query}]}
+        for: 2m
+        labels: {severity: critical, service: postgresql}
+        annotations: {summary: 'PostgreSQL is not running on {{ "{{" }} $labels.name {{ "}}" }}'}
+      # Alert when Redis has one or fewer visible members. Return an explicit
+      # 0/1 value so a healthy cluster is not reported as DatasourceNoData.
+      - uid: redis-cluster-members
+        title: Redis cluster member count is unhealthy
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: '(count(redis_instance_info{job="redis"}) <= bool 1) or absent(redis_instance_info{job="redis"}) or vector(0)', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: sum}, type: query}]}
+        for: 2m
+        labels: {severity: critical, service: redis}
+        annotations: {summary: 'Redis has one or fewer monitored members'}
+      - uid: redis-primary-count
+        title: Redis cluster has multiple primaries
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: '(count(redis_instance_info{job="redis", role="master"}) >= bool 2) or vector(0)', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: sum}, type: query}]}
+        for: 2m
+        labels: {severity: critical, service: redis}
+        annotations: {summary: 'Redis has two or more elected primaries'}
+      - uid: redis-replication-link
+        title: Redis replica link is down
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'redis_master_link_up{job="redis"} == 0', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: sum}, type: query}]}
+        for: 2m
+        labels: {severity: warning, service: redis}
+        annotations: {summary: 'Redis replica {{ "{{" }} $labels.instance {{ "}}" }} lost its primary link'}
+      # Any 5xx response through Traefik is worth investigating.
+      - uid: traefik-5xx-errors
+        title: Traefik 5xx responses detected
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'sum by(service, code) (rate(traefik_service_requests_total{code=~"5.."}[5m])) > 0', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: sum}, type: query}]}
+        for: 5m
+        labels: {severity: warning, service: traefik}
+        annotations: {summary: 'Traefik service {{ "{{" }} $labels.service {{ "}}" }} returns 5xx'}
+      - uid: keycloak-ha-capacity
+        title: Keycloak HA has no healthy replica
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'sum(up{job="keycloak"}) < 1', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: last}, type: query}]}
+        for: 2m
+        labels: {severity: critical, service: keycloak}
+        annotations: {summary: 'No healthy Keycloak replica is available'}
+      - uid: oauth2-proxy-ha-capacity
+        title: OAuth2 Proxy HA has no healthy replica
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'sum(up{job="oauth2-proxy"}) < 1', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: last}, type: query}]}
+        for: 2m
+        labels: {severity: critical, service: oauth2-proxy}
+        annotations: {summary: 'No healthy OAuth2 Proxy replica is available'}
+      - uid: freeipa-ha-capacity
+        title: FreeIPA HA has no healthy host
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: 'sum(probe_success{job="freeipa-http",service="freeipa"}) < 1', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: last}, type: query}]}
+        for: 2m
+        labels: {severity: critical, service: freeipa}
+        annotations: {summary: 'No FreeIPA replica host is monitored'}
+      - uid: freeipa-direct-probe-failed
+        title: FreeIPA direct service probe failed
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 300, to: 0}
+            model: {expr: '(sum(probe_success{job=~"freeipa-http|freeipa-ldap|freeipa-ldaps|freeipa-kerberos"} == 0) or vector(0)) > 0', instant: true, refId: A}
+          - refId: C
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}, operator: {type: and}, reducer: {type: last}, type: query}]}
+        for: 5m
+        labels: {severity: warning, service: freeipa}
+        annotations: {summary: 'One or more FreeIPA direct service probes failed'}

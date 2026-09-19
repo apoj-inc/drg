@@ -1,0 +1,76 @@
+---
+service:
+  name: dockerhub
+  topology: replicated
+  description: Docker Hub pull-through cache service.
+  tags: [opentofu, dockerhub, traefik-managed-route]
+
+startup:
+  order: 130
+
+rollout:
+  by_contour: true
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1004
+      B:
+        start: 1014
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+    keyctl: false
+    fuse: false
+
+compute:
+  cpu_cores: 2
+  memory_mb: 2048
+  swap_mb: 512
+  disk_gb: 100
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: app
+      dns_name_pattern: dockerhub-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: dockerhub.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+dockerhub:
+  registry_image_tag: "2"
+  listen_address: 0.0.0.0
+  http_port: 5000
+  metrics_port: 5001
+
+secrets:
+  path: kv/services/dockerhub
+  fields:
+    - dockerhub_proxy_username
+    - dockerhub_proxy_password
+
+freeipa_client:
+  hostgroups: [service-dockerhub]

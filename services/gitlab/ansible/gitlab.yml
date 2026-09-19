@@ -1,0 +1,35 @@
+---
+- name: Deploy GitLab
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('gitlab', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    gitlab_external_url: "{{ gitlab.external_url }}"
+    gitlab_shell_ssh_port: "{{ gitlab.shell_ssh_port }}"
+    gitlab_postgresql_host: "{{ gitlab.postgresql.host }}"
+    gitlab_postgresql_port: "{{ gitlab.postgresql.port }}"
+    gitlab_postgresql_database: "{{ gitlab.postgresql.database }}"
+    gitlab_postgresql_username: "{{ gitlab.postgresql.username }}"
+    gitlab_postgresql_password: "{{ lookup('env', 'GITLAB_POSTGRESQL_PASSWORD') }}"
+    traefik_trusted_proxy: "{{ gitlab.traefik_trusted_proxy }}"
+    authentik_issuer_url: "{{ gitlab.authentik.issuer_url }}"
+    authentik_client_id: "{{ gitlab.authentik.client_id }}"
+    authentik_client_secret: "{{ lookup('env', 'AUTHENTIK_CLIENT_SECRET') }}"
+    keycloak_gitlab_issuer_url: "{{ gitlab.keycloak.issuer_url }}"
+    keycloak_gitlab_client_id: "{{ gitlab.keycloak.client_id }}"
+    keycloak_gitlab_client_secret: "{{ lookup('env', 'KEYCLOAK_GITLAB_CLIENT_SECRET') }}"
+    gitlab_oidc_auto_link_user: "{{ gitlab.oidc.auto_link_user }}"
+    gitlab_oidc_allow_single_sign_on: "{{ gitlab.oidc.allow_single_sign_on }}"
+    gitlab_oidc_block_auto_created_users: "{{ gitlab.oidc.block_auto_created_users }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - gitlab_app
+    - monitoring_agent
+    - logging_agent

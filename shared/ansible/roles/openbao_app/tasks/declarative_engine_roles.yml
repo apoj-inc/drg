@@ -1,0 +1,16 @@
+---
+- name: Configure declared OpenBao secrets-engine roles for mount
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "{{ openbao_engine.mount }}/roles/{{ openbao_engine_role.name }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data: "{{ openbao_engine_role | dict2items | rejectattr('key', 'equalto', 'name') | items2dict }}"
+  loop: "{{ openbao_engine.roles | default([]) }}"
+  loop_control:
+    loop_var: openbao_engine_role
+    label: "{{ openbao_engine.mount }}/{{ openbao_engine_role.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true

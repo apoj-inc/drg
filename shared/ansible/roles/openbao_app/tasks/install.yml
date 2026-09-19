@@ -1,0 +1,126 @@
+---
+- name: Install Docker
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure OpenBao directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ openbao_compose_dir }}"
+    - "{{ openbao_compose_dir }}/config"
+    - "{{ openbao_tls_dir }}"
+
+- name: Create restricted host group for OpenBao mTLS key access
+  ansible.builtin.group:
+    name: "{{ openbao_tls_group }}"
+    gid: "{{ openbao_tls_group_id }}"
+    state: present
+
+- name: Install FreeIPA certificate prerequisites for OpenBao mTLS
+  ansible.builtin.apt:
+    name:
+      - certmonger
+      - freeipa-client
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Install FreeIPA CA used by OpenBao mTLS
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../freeipa/pki/trust/freeipa-ca.crt"
+    dest: "{{ openbao_tls_ca_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable certmonger for OpenBao server certificate renewal
+  ansible.builtin.service:
+    name: certmonger
+    state: started
+    enabled: true
+
+- name: Verify the FreeIPA host keytab is available
+  ansible.builtin.command:
+    argv:
+      - klist
+      - -k
+      - /etc/krb5.keytab
+  changed_when: false
+
+- name: Check existing OpenBao server certificate
+  ansible.builtin.stat:
+    path: "{{ openbao_tls_cert_file }}"
+  register: openbao_tls_cert
+
+- name: Check existing OpenBao certmonger requests
+  ansible.builtin.command:
+    argv:
+      - ipa-getcert
+      - list
+  register: openbao_certmonger_requests
+  changed_when: false
+  failed_when: false
+  when: not openbao_tls_cert.stat.exists
+
+- name: Request renewable FreeIPA certificate for OpenBao mTLS
+  ansible.builtin.command:
+    argv:
+      - ipa-getcert
+      - request
+      - -K
+      - "{{ openbao_tls_cert_request_principal }}"
+      - -k
+      - "{{ openbao_tls_key_file }}"
+      - -f
+      - "{{ openbao_tls_cert_file }}"
+      - -N
+      - "CN={{ openbao_mtls_hostname }}"
+      - -D
+      - "{{ openbao_mtls_hostname }}"
+  when:
+    - not openbao_tls_cert.stat.exists
+    - openbao_certmonger_requests.rc | default(1) != 0 or
+      openbao_tls_cert_file not in openbao_certmonger_requests.stdout
+  register: openbao_tls_cert_request
+
+- name: Wait for OpenBao mTLS certificate issuance
+  ansible.builtin.stat:
+    path: "{{ openbao_tls_cert_file }}"
+  register: openbao_tls_cert
+  until: openbao_tls_cert.stat.exists
+  retries: 12
+  delay: 5
+  ignore_errors: true
+
+- name: Read OpenBao certmonger status after certificate wait
+  ansible.builtin.command:
+    argv:
+      - ipa-getcert
+      - list
+  register: openbao_certmonger_status
+  changed_when: false
+  when: not openbao_tls_cert.stat.exists
+
+- name: Report OpenBao certificate issuance failure
+  ansible.builtin.fail:
+    msg: >-
+      OpenBao mTLS certificate was not issued at {{ openbao_tls_cert_file }}.
+      certmonger status:
+      {{ openbao_certmonger_status.stdout | default('unavailable') }}
+  when: not openbao_tls_cert.stat.exists
+
+- name: Set OpenBao mTLS certificate permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: "{{ openbao_tls_group if item.secret else 'root' }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ openbao_tls_cert_file }}", mode: "0644", secret: false}
+    - {path: "{{ openbao_tls_key_file }}", mode: "0640", secret: true}

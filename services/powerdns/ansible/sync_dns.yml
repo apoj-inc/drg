@@ -1,0 +1,17 @@
+---
+- name: Synchronize NetBox DNS to PowerDNS through octoDNS
+  hosts: >-
+    {{ lookup('env', 'ANSIBLE_LIMIT') | default('tags_powerdns', true) }}
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../config.yaml
+  vars:
+    pdns_sync_zone: "{{ powerdns.local_zone }}."
+    pdns_sync_powerdns_port: "{{ powerdns.api_port }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - pdns_sync

@@ -1,0 +1,22 @@
+---
+- name: Check Alloy service
+  ansible.builtin.systemd:
+    name: "{{ logging_agent_service_name }}"
+  register: logging_agent_service_status
+  changed_when: false
+
+- name: Assert Alloy is running
+  ansible.builtin.assert:
+    that:
+      - logging_agent_service_status.status.ActiveState == "active"
+    fail_msg: Grafana Alloy is not running
+
+- name: Wait for Alloy readiness endpoint
+  ansible.builtin.uri:
+    url: "{{ logging_agent_healthcheck_url }}"
+    method: GET
+    status_code: 200
+  register: logging_agent_readiness
+  retries: 10
+  delay: 2
+  until: logging_agent_readiness.status == 200

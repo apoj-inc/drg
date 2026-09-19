@@ -1,0 +1,302 @@
+---
+- name: Validate Woodpecker agent credentials
+  ansible.builtin.assert:
+    that:
+      - woodpecker_agent_api_url | length > 0
+      - woodpecker_agent_organization | length > 0
+      - woodpecker_agent_name | length > 0
+      - woodpecker_agent_contour | length > 0
+    fail_msg: Woodpecker API URL, organization, agent name, and deployment contour must be provided.
+  no_log: true
+
+- name: Remove legacy Woodpecker server HA units from agent hosts
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  loop:
+    - woodpecker-etcd-ha.service
+    - woodpecker-ha.service
+    - woodpecker-agent-etcd-ha.service
+    - woodpecker-agent-ha.service
+  failed_when: false
+  changed_when: false
+
+- name: Install Woodpecker agent prerequisites
+  ansible.builtin.apt:
+    name:
+      - ansible
+      - ca-certificates
+      - curl
+      - git
+      - git-lfs
+      - openssh-client
+      - python3
+      - python3-jinja2
+      - python3-hvac
+      - python3-pynetbox
+      - python3-requests
+      - python3-requests-kerberos
+      - python3-tz
+      - python3-yaml
+      - yamllint
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Install Docker for the Dagger engine
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure Woodpecker agent group exists
+  ansible.builtin.group:
+    name: "{{ woodpecker_agent_group }}"
+    system: true
+    state: present
+
+- name: Ensure Woodpecker agent user exists
+  ansible.builtin.user:
+    name: "{{ woodpecker_agent_user }}"
+    group: "{{ woodpecker_agent_group }}"
+    groups: docker
+    append: true
+    system: true
+    create_home: true
+    home: /var/lib/woodpecker
+    shell: /bin/bash
+
+- name: Ensure Woodpecker agent configuration directory is writable
+  ansible.builtin.file:
+    path: "{{ woodpecker_agent_env_file | dirname }}"
+    state: directory
+    owner: "{{ woodpecker_agent_user }}"
+    group: "{{ woodpecker_agent_group }}"
+    mode: "0750"
+
+- name: Check for a persisted Woodpecker agent token
+  ansible.builtin.stat:
+    path: "{{ woodpecker_agent_secret_file }}"
+  register: woodpecker_agent_secret_stat
+
+- name: Read the persisted Woodpecker agent token
+  ansible.builtin.slurp:
+    src: "{{ woodpecker_agent_secret_file }}"
+  register: woodpecker_agent_secret_content
+  when: woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Reuse the persisted Woodpecker agent token
+  ansible.builtin.set_fact:
+    woodpecker_agent_secret: "{{ woodpecker_agent_secret_content.content | b64decode | trim }}"
+  when: woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Require Woodpecker API credentials for first token provisioning
+  ansible.builtin.assert:
+    that:
+      - woodpecker_agent_api_token | length > 0
+    fail_msg: Woodpecker API token is required when the local agent token does not exist.
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Resolve the Woodpecker organization for token provisioning
+  ansible.builtin.uri:
+    url: "{{ woodpecker_agent_api_url | trim('/') }}/api/orgs/lookup/{{ woodpecker_agent_organization | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ woodpecker_agent_api_token }}"
+    return_content: true
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: woodpecker_agent_org
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Set the Woodpecker organization ID
+  ansible.builtin.set_fact:
+    woodpecker_agent_org_id: "{{ woodpecker_agent_org.json.id | default(0) }}"
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Validate the Woodpecker organization
+  ansible.builtin.assert:
+    that:
+      - woodpecker_agent_org_id | int > 0
+    fail_msg: "Woodpecker organization was not found: {{ woodpecker_agent_organization }}"
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: List organization Woodpecker agents for token provisioning
+  ansible.builtin.uri:
+    url: "{{ woodpecker_agent_api_url | trim('/') }}/api/orgs/{{ woodpecker_agent_org_id }}/agents?perPage=100"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ woodpecker_agent_api_token }}"
+    return_content: true
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: woodpecker_agent_list
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Find the existing Woodpecker agent by hostname
+  ansible.builtin.set_fact:
+    woodpecker_existing_agent: >-
+      {{ (woodpecker_agent_list.json
+          | selectattr('name', 'equalto', woodpecker_agent_name)
+          | list
+          | first) | default({}, true) }}
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Register the Woodpecker agent and generate its token
+  ansible.builtin.uri:
+    url: "{{ woodpecker_agent_api_url | trim('/') }}/api/orgs/{{ woodpecker_agent_org_id }}/agents"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ woodpecker_agent_api_token }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "{{ woodpecker_agent_name }}"
+      no_schedule: false
+    return_content: true
+    status_code: [200, 201]
+  delegate_to: localhost
+  become: false
+  register: woodpecker_agent_registration
+  when:
+    - not woodpecker_agent_secret_stat.stat.exists
+    - woodpecker_existing_agent.id | default(0) | int == 0
+  no_log: true
+
+- name: Select the existing or newly registered Woodpecker agent token
+  ansible.builtin.set_fact:
+    woodpecker_agent_secret: >-
+      {{ (woodpecker_agent_registration.json.token
+          if woodpecker_agent_registration is defined and woodpecker_agent_registration.json is defined
+          else woodpecker_existing_agent.token | default('')) }}
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Validate the provisioned Woodpecker agent token
+  ansible.builtin.assert:
+    that:
+      - woodpecker_agent_secret | default('') | trim | length > 0
+    fail_msg: >-
+      Woodpecker agent token was not found locally and could not be created or
+      retrieved from the API. Remove the local token file only when the agent
+      should be reprovisioned.
+  no_log: true
+
+- name: Persist the Woodpecker agent token locally
+  ansible.builtin.copy:
+    content: "{{ woodpecker_agent_secret }}\n"
+    dest: "{{ woodpecker_agent_secret_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not woodpecker_agent_secret_stat.stat.exists
+  no_log: true
+
+- name: Download Woodpecker agent package
+  ansible.builtin.get_url:
+    url: "https://github.com/woodpecker-ci/woodpecker/releases/download/v{{ woodpecker_agent_version }}/woodpecker-agent_{{ woodpecker_agent_version }}_amd64.deb"
+    dest: "/tmp/woodpecker-agent_{{ woodpecker_agent_version }}_amd64.deb"
+    mode: "0644"
+  environment: "{{ external_download_environment }}"
+
+- name: Install Woodpecker agent package
+  ansible.builtin.apt:
+    deb: "/tmp/woodpecker-agent_{{ woodpecker_agent_version }}_amd64.deb"
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Check installed Dagger CLI version
+  ansible.builtin.command:
+    cmd: "{{ woodpecker_agent_binary | dirname }}/dagger version"
+  register: woodpecker_agent_dagger_version_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Dagger CLI
+  ansible.builtin.shell:
+    cmd: >-
+      curl -fsSL https://dl.dagger.io/dagger/install.sh |
+      BIN_DIR=/usr/local/bin DAGGER_VERSION={{ woodpecker_agent_dagger_version }} sh
+  when: >-
+    woodpecker_agent_dagger_version not in
+    (woodpecker_agent_dagger_version_check.stdout | default(''))
+  environment: "{{ external_download_environment }}"
+
+- name: Install Local backend Git clone plugin
+  ansible.builtin.get_url:
+    url: "https://github.com/woodpecker-ci/plugin-git/releases/download/{{ woodpecker_agent_plugin_git_version }}/linux-amd64_plugin-git"
+    dest: "{{ woodpecker_agent_plugin_git_binary }}"
+    mode: "0755"
+    checksum: "sha256:be3c3fa5363ddaff0dac88c2dc5b745ca785f21d5554f90b47d132d34baebcec"
+  environment: "{{ external_download_environment }}"
+
+- name: Ensure Woodpecker agent state directory exists
+  ansible.builtin.file:
+    path: "{{ woodpecker_agent_state_dir }}"
+    state: directory
+    owner: "{{ woodpecker_agent_user }}"
+    group: "{{ woodpecker_agent_group }}"
+    mode: "0750"
+
+- name: Render Woodpecker agent environment
+  ansible.builtin.template:
+    src: agent.env.j2
+    dest: "{{ woodpecker_agent_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart Woodpecker agent
+
+- name: Render Woodpecker agent systemd unit
+  ansible.builtin.template:
+    src: woodpecker-agent.service.j2
+    dest: /etc/systemd/system/woodpecker-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Woodpecker agent
+
+- name: Apply Woodpecker agent configuration before starting
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Woodpecker agent
+  ansible.builtin.systemd:
+    name: woodpecker-agent
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verify Woodpecker agent is active
+  ansible.builtin.command: systemctl is-active --quiet woodpecker-agent
+  changed_when: false
+
+- name: Mark healthy Woodpecker agent as eligible for canonical DNS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../../../shared/scripts/reconcile_service_dns.py"
+      - mark-eligible
+      - --config
+      - "{{ playbook_dir }}/../config.yaml"
+      - --hostname
+      - "{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  environment:
+    NETBOX_API: "{{ lookup('env', 'NETBOX_API') }}"
+    NETBOX_TOKEN: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+    NETBOX_VALIDATE_CERTS: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') }}"
+  changed_when: false

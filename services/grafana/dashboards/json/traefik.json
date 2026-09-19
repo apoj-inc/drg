@@ -1,0 +1,191 @@
+{
+  "editable": false,
+  "panels": [
+    {
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "time() - traefik_config_last_reload_success",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 604800
+              },
+              {
+                "color": "red",
+                "value": 1209600
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background_solid",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "textMode": "value"
+      },
+      "title": "Seconds since successful config reload",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 18,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum by(router,code) (rate(traefik_router_requests_total{router=~\"$router\"}[5m]))",
+          "legendFormat": "{{router}} {{code}}",
+          "refId": "A"
+        }
+      ],
+      "title": "RPS by router/code",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "sum by(router) (rate(traefik_router_requests_total{router=~\"$router\",code=~\"5..\"}[5m])) / sum by(router) (rate(traefik_router_requests_total{router=~\"$router\"}[5m]))",
+          "legendFormat": "{{router}}",
+          "refId": "A"
+        }
+      ],
+      "title": "5xx ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by(le,router) (rate(traefik_router_request_duration_seconds_bucket{router=~\"$router\"}[5m])))",
+          "legendFormat": "{{router}}",
+          "refId": "A"
+        }
+      ],
+      "title": "p95 latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "sum by(entrypoint,protocol) (traefik_open_connections)",
+          "legendFormat": "{{entrypoint}} {{protocol}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Open connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "(traefik_tls_certs_not_after - time()) / 86400",
+          "legendFormat": "{{cn}}",
+          "refId": "A"
+        }
+      ],
+      "title": "TLS certificate days remaining",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "traefik",
+    "http"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".+",
+        "datasource": {
+          "uid": "prometheus"
+        },
+        "includeAll": true,
+        "multi": true,
+        "name": "router",
+        "query": "label_values(traefik_router_requests_total, router)",
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "title": "Traefik",
+  "uid": "traefik",
+  "version": 2
+}

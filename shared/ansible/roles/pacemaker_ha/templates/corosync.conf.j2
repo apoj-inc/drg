@@ -1,0 +1,28 @@
+totem {
+  version: 2
+  cluster_name: {{ pacemaker_ha_cluster_name }}
+  secauth: on
+  transport: knet
+}
+
+nodelist {
+{% for node in groups[pacemaker_ha_group] %}
+  node {
+    ring0_addr: {{ hostvars[node].ansible_host }}
+    name: {{ hostvars[node].ansible_host_fqdn | default(node) }}
+    nodeid: {{ loop.index }}
+  }
+{% endfor %}
+}
+
+quorum {
+  provider: corosync_votequorum
+  two_node: 1
+  wait_for_all: 1
+}
+
+logging {
+  to_syslog: yes
+  logfile: /var/log/corosync/corosync.log
+  log_timestamp: on
+}

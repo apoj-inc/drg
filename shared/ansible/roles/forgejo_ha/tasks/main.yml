@@ -1,0 +1,175 @@
+---
+- name: Validate Forgejo HA storage backend
+  ansible.builtin.assert:
+    that:
+      - forgejo_ha_storage_backend in ['drbd', 'shared_filesystem']
+      - >-
+        forgejo_ha_storage_backend != 'drbd'
+        or groups[forgejo_ha_group] | length <= 2
+      - >-
+        forgejo_ha_storage_backend != 'shared_filesystem'
+        or forgejo_ha_shared_mount_source | length > 0
+    fail_msg: >-
+      Forgejo uses DRBD only with one or two candidates. For three or more
+      candidates configure shared_filesystem and provide a shared mount source.
+
+- name: Record Forgejo HA ownership state
+  ansible.builtin.set_fact:
+    forgejo_managed_by_ha: >-
+      {{
+        (etcd_ha_managed_by_controller | default(false) | bool)
+        or (pacemaker_ha_managed_by_cluster | default(false) | bool)
+        or (forgejo_ha_deferred | default(false) | bool)
+      }}
+
+- name: Validate Forgejo DRBD secret
+  ansible.builtin.assert:
+    that:
+      - forgejo_ha_drbd_shared_secret | length >= 20
+    fail_msg: Forgejo DRBD requires a shared secret of at least 20 characters.
+  no_log: true
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Install Forgejo DRBD packages
+  ansible.builtin.apt:
+    name:
+      - drbd-utils
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Load the DRBD kernel module
+  ansible.builtin.command: modprobe drbd
+  changed_when: false
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Inspect the configured DRBD backing device
+  ansible.builtin.stat:
+    path: "{{ forgejo_ha_drbd_backing_device }}"
+    follow: true
+  register: forgejo_ha_backing_device
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Inspect the root filesystem source before using the DRBD device
+  ansible.builtin.command: findmnt --noheadings --output SOURCE /
+  register: forgejo_ha_root_source
+  changed_when: false
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Inspect mounted devices on the DRBD backing device
+  ansible.builtin.command: >-
+    lsblk --list --noheadings --paths --output NAME,MOUNTPOINTS
+    {{ forgejo_ha_drbd_backing_device }}
+  register: forgejo_ha_backing_mounts
+  changed_when: false
+  failed_when: false
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Refuse unsafe DRBD backing devices
+  ansible.builtin.assert:
+    that:
+      - forgejo_ha_backing_device.stat.exists
+      - forgejo_ha_backing_device.stat.isblk
+      - >-
+        not (forgejo_ha_root_source.stdout | trim).startswith(
+          forgejo_ha_drbd_backing_device
+        )
+      - >-
+        (
+          forgejo_ha_backing_mounts.stdout_lines
+          | select('search', '\\s+/')
+          | reject('match', '^/dev/drbd[0-9]+\\s+')
+          | list
+          | length
+        ) == 0
+    fail_msg: >-
+      {{ forgejo_ha_drbd_backing_device }} must be a dedicated data block
+      device and must not contain the root filesystem or be mounted directly.
+      An existing mounted /dev/drbd* device backed by this disk is allowed.
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Check whether the DRBD backing device is already mounted
+  ansible.builtin.command: >-
+    findmnt --noheadings --source {{ forgejo_ha_drbd_backing_device }}
+  register: forgejo_ha_backing_mount
+  changed_when: false
+  failed_when: forgejo_ha_backing_mount.rc not in [0, 1]
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Refuse mounted DRBD backing devices
+  ansible.builtin.assert:
+    that: forgejo_ha_backing_mount.stdout | trim | length == 0
+    fail_msg: >-
+      {{ forgejo_ha_drbd_backing_device }} is mounted directly. Unmount it and
+      verify its contents before DRBD initialization.
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Ensure DRBD configuration directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/drbd.d
+    - "{{ forgejo_ha_mountpoint }}"
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Render DRBD resource configuration
+  ansible.builtin.template:
+    src: forgejo.res.j2
+    dest: "/etc/drbd.d/{{ forgejo_ha_drbd_resource }}.res"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Validate the complete DRBD resource configuration
+  ansible.builtin.command: "drbdadm dump {{ forgejo_ha_drbd_resource }}"
+  changed_when: false
+  no_log: true
+  when:
+    - forgejo_ha_storage_backend == 'drbd'
+    - groups[forgejo_ha_group] is defined
+    - groups[forgejo_ha_group] | length >= 2
+
+- name: Render Forgejo DRBD resource startup unit
+  ansible.builtin.template:
+    src: forgejo-drbd.service.j2
+    dest: "/etc/systemd/system/{{ forgejo_ha_drbd_unit }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Bring up the Forgejo DRBD resource on every candidate
+  ansible.builtin.systemd_service:
+    name: "{{ forgejo_ha_drbd_unit }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: forgejo_ha_storage_backend == 'drbd'
+
+- name: Render Pacemaker resource setup command
+  ansible.builtin.template:
+    src: forgejo-ha-resource-setup.sh.j2
+    dest: "{{ forgejo_ha_resource_setup_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  no_log: true
+  when:
+    - forgejo_ha_backend == 'pacemaker'
+    - forgejo_ha_sync | default(false) | bool
+
+- name: Render Forgejo etcd storage/application control command
+  ansible.builtin.template:
+    src: forgejo-ha-control.sh.j2
+    dest: "{{ forgejo_ha_control_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+  when: forgejo_ha_backend == 'etcd'

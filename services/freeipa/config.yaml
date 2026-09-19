@@ -1,0 +1,159 @@
+---
+service:
+  name: freeipa
+  topology: replicated
+  description: FreeIPA identity-management service.
+  tags: [opentofu, freeipa, traefik-managed-route, identity]
+
+startup:
+  order: 50
+
+logging:
+  journal_units:
+    - dirsrv@EXAMPLE-TEST
+    - httpd
+    - ipa
+    - ipa-otpd
+    - kadmin
+    - krb5kdc
+    - named-pkcs11
+    - pki-tomcatd@pki-tomcat
+    - sssd
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+rollout:
+  by_contour: true
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1030
+      B:
+        start: 1040
+
+vm_template:
+  cloudinit_template_vm_id: 9001
+
+compute:
+  cpu_cores: 4
+  memory_mb: 4096
+  disk_gb: 20
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: identity
+      dns_name_pattern: freeipa-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: ipa.example.test
+  zone: example.test
+  ttl: 60
+  records:
+    # FreeIPA clients discover LDAP/Kerberos directly through both native
+    # replicas. These records intentionally do not point at Traefik.
+    - name: _ldap._tcp
+      type: SRV
+      value: 0 100 389 freeipa-node-a.example.test
+    - name: _ldap._tcp
+      type: SRV
+      value: 0 100 389 freeipa-node-b.example.test
+    - name: _kerberos._tcp
+      type: SRV
+      value: 0 100 88 freeipa-node-a.example.test
+    - name: _kerberos._tcp
+      type: SRV
+      value: 0 100 88 freeipa-node-b.example.test
+    - name: _kerberos._udp
+      type: SRV
+      value: 0 100 88 freeipa-node-a.example.test
+    - name: _kerberos._udp
+      type: SRV
+      value: 0 100 88 freeipa-node-b.example.test
+    - name: _kerberos-master._tcp
+      type: SRV
+      value: 0 100 88 freeipa-node-a.example.test
+    - name: _kerberos-master._tcp
+      type: SRV
+      value: 0 100 88 freeipa-node-b.example.test
+    - name: _kerberos-master._udp
+      type: SRV
+      value: 0 100 88 freeipa-node-a.example.test
+    - name: _kerberos-master._udp
+      type: SRV
+      value: 0 100 88 freeipa-node-b.example.test
+    - name: _kpasswd._tcp
+      type: SRV
+      value: 0 100 464 freeipa-node-a.example.test
+    - name: _kpasswd._tcp
+      type: SRV
+      value: 0 100 464 freeipa-node-b.example.test
+    - name: _kpasswd._udp
+      type: SRV
+      value: 0 100 464 freeipa-node-a.example.test
+    - name: _kpasswd._udp
+      type: SRV
+      value: 0 100 464 freeipa-node-b.example.test
+    - name: _kerberos
+      type: TXT
+      value: EXAMPLE.TEST
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+freeipa:
+  listen_address: 0.0.0.0
+  public_hostname: ipa.example.test
+  domain: example.test
+  realm: EXAMPLE.TEST
+  setup_dns: false
+  no_ntp: true
+  skip_mem_check: true
+  setup_ca: true
+  reset_data: false
+  replica_source_host: freeipa-node-a.example.test
+  replica_source_ip: ""
+  ldap_connection_urls:
+    - ldaps://freeipa-node-a.example.test:636
+    - ldaps://freeipa-node-b.example.test:636
+  ports:
+    http: 80
+    https: 443
+    ldap: 389
+    ldaps: 636
+    kerberos: 88
+    kpasswd: 464
+  iac:
+    root: /var/lib/freeipa/iac
+    profiles_dir: /var/lib/freeipa/iac/profiles
+    identity_dir: /var/lib/freeipa/iac/identity
+    backup_dir: /var/lib/freeipa/iac/backups
+    healthcheck_timeout_seconds: 60
+    healthcheck_sources:
+      - ipahealthcheck.ds.backends
+      - ipahealthcheck.ds.config
+      - ipahealthcheck.ds.dse
+      - ipahealthcheck.ds.replication
+      - ipahealthcheck.ipa.certs
+      - ipahealthcheck.ipa.topology
+      - ipahealthcheck.dogtag.ca
+      - ipahealthcheck.meta.services
+    external_dns_validation: true
+secrets:
+  path: kv/services/freeipa
+  fields:
+    - freeipa_admin_password
+    - freeipa_directory_manager_password
+    - keycloak_freeipa_bind_password

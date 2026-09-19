@@ -1,0 +1,78 @@
+---
+service:
+  name: forgejo-runner
+  topology: replicated
+  description: Forgejo Actions host runner service.
+  tags: [opentofu, forgejo-runner]
+
+rollout:
+  by_contour: true
+
+startup:
+  order: 170
+
+logging:
+  journal_units:
+    - forgejo-runner
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A: {start: 1111}
+      B: {start: 1112}
+
+compute:
+  cpu_cores: 4
+  memory_mb: 8096
+  swap_mb: 1024
+  disk_gb: 30
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      dns_name_pattern: forgejo-runner-%{cluster}-%{contour}-%02d
+      role: app
+      ansible_primary: true
+
+dns:
+  canonical_name: forgejo-runners.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: direct
+    publish_after_healthcheck: true
+    direct:
+      record_type: A
+
+forgejo_runner:
+  server_url: https://forge.example.test/
+  scope: example-org/drg
+  capacity: 8
+  rollout:
+    runner_labels:
+      A: [forgejo-host:host, rollout-target-b, rollout-target-c]
+      B: [forgejo-host:host, rollout-target-a, rollout-target-c]
+      C: [forgejo-host:host, rollout-target-a, rollout-target-b]
+
+secrets:
+  path: kv/services/forgejo-runner
+  fields: []
+
+freeipa_client:
+  hostgroups: [service-forgejo-runner]

@@ -1,0 +1,13 @@
+---
+compose_app_name: ""
+compose_app_root: "/opt/{{ compose_app_name }}"
+compose_app_compose_file: "{{ compose_app_root }}/docker-compose.yml"
+compose_app_env_file: "{{ compose_app_root }}/.env"
+compose_app_project_name: "{{ compose_app_name }}"
+compose_app_pull_policy: missing
+compose_app_down_before_deploy: false
+compose_app_healthcheck_url: ""
+compose_app_healthcheck_status_code: 200
+compose_app_healthcheck_follow_redirects: safe
+compose_app_healthcheck_retries: 1
+compose_app_healthcheck_delay: 0

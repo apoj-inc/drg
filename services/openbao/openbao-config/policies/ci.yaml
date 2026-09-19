@@ -1,0 +1,9 @@
+---
+name: ci
+rules:
+  - path: kv/data/example-cluster
+    capabilities: [read]
+  - path: kv/data/platform/openstack
+    capabilities: [read]
+  - path: kv/data/services/*
+    capabilities: [read]

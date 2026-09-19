@@ -1,0 +1,17 @@
+[Unit]
+Description={{ pacemaker_ha_service_description }}
+{% if pacemaker_ha_service_requires | length > 0 %}Requires={{ pacemaker_ha_service_requires | join(' ') }}
+{% endif %}After={{ pacemaker_ha_service_after | join(' ') }}
+{% if pacemaker_ha_service_wants | length > 0 %}Wants={{ pacemaker_ha_service_wants | join(' ') }}
+{% endif %}
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ pacemaker_ha_service_working_directory }}
+ExecStart={{ pacemaker_ha_service_exec_start }}
+ExecStop={{ pacemaker_ha_service_exec_stop }}
+TimeoutStartSec={{ pacemaker_ha_service_timeout_start }}
+TimeoutStopSec={{ pacemaker_ha_service_timeout_stop }}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+---
+mount: ssh-user
+type: ssh
+description: OpenSSH user certificate authority. Not used for bootstrap in this iteration.
+ca:
+  generate_signing_key: true
+roles:
+  - name: user
+    key_type: ca
+    allow_user_certificates: true
+    allowed_users: "*"
+    allowed_extensions: permit-pty,permit-port-forwarding
+    allowed_critical_options: ""
+    default_extensions:
+      permit-pty: ""
+      permit-port-forwarding: ""
+    ttl: 8h
+    max_ttl: 24h

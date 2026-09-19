@@ -1,0 +1,9 @@
+---
+http:
+  - name: dockerhub
+    host: "dockerhub.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 5000
+    middlewares:
+      - lan-and-vpn-only
+      - secure-headers
+      - rate-limit

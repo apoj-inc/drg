@@ -1,0 +1,219 @@
+---
+- name: Validate declarative OpenBao configuration inputs
+  ansible.builtin.assert:
+    that:
+      - openbao_config_directory | string | length > 0
+      - openbao_config_directory is directory
+      - not (openbao_config_apply | bool) or (openbao_config_token | string | length > 0)
+      - not (openbao_config_apply | bool) or not (openbao_config_bootstrap | bool) or (openbao_root_token | string | length > 0)
+    fail_msg: >-
+      openbao_config_directory must name the repository configuration directory.
+      OPENBAO_CONFIG_TOKEN is
+      required when OPENBAO_CONFIG_APPLY is true. OPENBAO_ROOT_TOKEN is accepted
+      only when OPENBAO_CONFIG_BOOTSTRAP=true.
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Find declarative OpenBao policy files
+  ansible.builtin.find:
+    paths: "{{ openbao_config_directory }}/policies"
+    patterns: "*.yaml"
+    file_type: file
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: openbao_policy_files
+  changed_when: false
+
+- name: Find declarative OpenBao secrets-engine files
+  ansible.builtin.find:
+    paths: "{{ openbao_config_directory }}/secrets-engines"
+    patterns: "*.yaml"
+    file_type: file
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: openbao_engine_files
+  changed_when: false
+
+- name: Find declarative OpenBao auth files
+  ansible.builtin.find:
+    paths: "{{ openbao_config_directory }}/auth"
+    patterns: "*.yaml"
+    excludes: "{{ openbao_declarative_auth_exclude_files }}"
+    file_type: file
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: openbao_auth_files
+  changed_when: false
+
+- name: Show declarative OpenBao configuration plan
+  ansible.builtin.debug:
+    msg:
+      apply: "{{ openbao_config_apply | bool }}"
+      policies: "{{ openbao_policy_files.files | map(attribute='path') | map('basename') | list | sort }}"
+      secrets_engines: "{{ openbao_engine_files.files | map(attribute='path') | map('basename') | list | sort }}"
+      auth: "{{ openbao_auth_files.files | map(attribute='path') | map('basename') | list | sort }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Read OpenBao secrets-engine mounts
+  community.hashi_vault.vault_read:
+    url: "{{ openbao_api_addr }}"
+    path: sys/mounts
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: openbao_declarative_mounts
+  changed_when: false
+  no_log: true
+  when: openbao_config_apply | bool
+
+- name: Validate existing OpenBao secrets-engine types
+  ansible.builtin.assert:
+    that:
+      - openbao_engine.mount ~ '/' not in (openbao_declarative_mounts.data.data | default({})) or
+        openbao_declarative_mounts.data.data[openbao_engine.mount ~ '/'].type == openbao_engine.type
+    fail_msg: >-
+      OpenBao mount {{ openbao_engine.mount }} already exists with a different
+      type than declared.
+  vars:
+    openbao_engine: "{{ lookup('ansible.builtin.file', openbao_engine_file.path) | from_yaml }}"
+  loop: "{{ openbao_engine_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_engine_file
+    label: "{{ openbao_engine_file.path | basename }}"
+  when: openbao_config_apply | bool
+
+- name: Enable declared OpenBao secrets engines
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "sys/mounts/{{ openbao_engine.mount }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      type: "{{ openbao_engine.type }}"
+      description: "{{ openbao_engine.description | default(omit) }}"
+      options: "{{ openbao_engine.options | default(omit) }}"
+  vars:
+    openbao_engine: "{{ lookup('ansible.builtin.file', openbao_engine_file.path) | from_yaml }}"
+  loop: "{{ openbao_engine_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_engine_file
+    label: "{{ openbao_engine.mount }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - openbao_config_apply | bool
+    - (openbao_engine.mount ~ '/') not in (openbao_declarative_mounts.data.data | default({}))
+  no_log: true
+
+- name: Tune declared OpenBao secrets engines
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "sys/mounts/{{ openbao_engine.mount }}/tune"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      max_lease_ttl: "{{ openbao_engine.max_lease_ttl }}"
+  vars:
+    openbao_engine: "{{ lookup('ansible.builtin.file', openbao_engine_file.path) | from_yaml }}"
+  loop: "{{ openbao_engine_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_engine_file
+    label: "{{ openbao_engine.mount }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - openbao_config_apply | bool
+    - openbao_engine.max_lease_ttl is defined
+  no_log: true
+
+- name: Generate SSH CA keys for newly declared mounts
+  ansible.builtin.include_tasks: declarative_ca.yml
+  vars:
+    openbao_ca_kind: ssh
+    openbao_engine: "{{ lookup('ansible.builtin.file', openbao_engine_file.path) | from_yaml }}"
+  loop: "{{ openbao_engine_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_engine_file
+    label: "{{ openbao_engine.mount }}"
+  when: openbao_config_apply | bool
+
+- name: Initialize declared PKI certificate authorities
+  ansible.builtin.include_tasks: declarative_ca.yml
+  vars:
+    openbao_ca_kind: pki
+    openbao_engine: "{{ lookup('ansible.builtin.file', openbao_engine_file.path) | from_yaml }}"
+  loop: "{{ openbao_engine_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_engine_file
+    label: "{{ openbao_engine_file.path | basename }}"
+  when: openbao_config_apply | bool
+
+- name: Configure declared OpenBao secrets-engine roles
+  ansible.builtin.include_tasks: declarative_engine_roles.yml
+  vars:
+    openbao_engine: "{{ lookup('ansible.builtin.file', openbao_engine_file.path) | from_yaml }}"
+  loop: "{{ openbao_engine_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_engine_file
+    label: "{{ openbao_engine_file.path | basename }}"
+  when: openbao_config_apply | bool
+
+- name: Write declared OpenBao ACL policies
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "sys/policies/acl/{{ openbao_policy.name }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      policy: |-
+        {% for rule in openbao_policy.rules %}
+        path "{{ rule.path }}" {
+          capabilities = {{ rule.capabilities | to_json }}
+        }
+        {% endfor %}
+  vars:
+    openbao_policy: "{{ lookup('ansible.builtin.file', openbao_policy_file.path) | from_yaml }}"
+  loop: "{{ openbao_policy_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_policy_file
+    label: "{{ openbao_policy.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: openbao_config_apply | bool
+  no_log: true
+
+- name: Read OpenBao auth mounts
+  community.hashi_vault.vault_read:
+    url: "{{ openbao_api_addr }}"
+    path: sys/auth
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: openbao_declarative_auth_mounts
+  changed_when: false
+  no_log: true
+  when: openbao_config_apply | bool
+
+- name: Enable declared OpenBao auth methods
+  ansible.builtin.include_tasks: declarative_auth.yml
+  vars:
+    openbao_auth_definition: "{{ lookup('ansible.builtin.file', openbao_auth_file.path) | from_yaml }}"
+  loop: "{{ openbao_auth_files.files | sort(attribute='path') }}"
+  loop_control:
+    loop_var: openbao_auth_file
+    label: "{{ openbao_auth_file.path | basename }}"
+  when: openbao_config_apply | bool

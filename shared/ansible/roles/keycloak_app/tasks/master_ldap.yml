@@ -1,0 +1,125 @@
+---
+- name: Configure FreeIPA administrators in the Keycloak master realm
+  module_defaults:
+    group/middleware_automation.keycloak.keycloak:
+      auth_keycloak_url: "{{ keycloak_admin_api_url }}"
+      auth_realm: master
+      auth_username: "{{ keycloak_admin_username }}"
+      auth_password: "{{ keycloak_admin_password }}"
+      validate_certs: false
+  block:
+    - name: Ensure the Keycloak group parent for FreeIPA groups exists
+      middleware_automation.keycloak.keycloak_group:
+        realm: master
+        name: "{{ keycloak_freeipa_master_admins_keycloak_group_parent }}"
+        state: present
+
+    - name: Ensure the mapped FreeIPA admins group exists
+      middleware_automation.keycloak.keycloak_group:
+        realm: master
+        name: "{{ keycloak_freeipa_master_admins_ldap_group }}"
+        parents:
+          - name: "{{ keycloak_freeipa_master_admins_keycloak_group_parent }}"
+        state: present
+
+    - name: Configure the FreeIPA LDAP provider in the master realm
+      middleware_automation.keycloak.keycloak_user_federation:
+        realm: master
+        name: "{{ keycloak_freeipa_master_admins_provider_name }}"
+        state: present
+        provider_id: ldap
+        provider_type: org.keycloak.storage.UserStorageProvider
+        bind_credential_update_mode: only_indirect
+        remove_unspecified_mappers: false
+        config:
+          priority: 0
+          enabled: true
+          cachePolicy: DEFAULT
+          batchSizeForSync: 1000
+          editMode: READ_ONLY
+          importEnabled: true
+          syncRegistrations: false
+          vendor: other
+          usernameLDAPAttribute: "{{ keycloak_freeipa_username_ldap_attribute }}"
+          rdnLDAPAttribute: "{{ keycloak_freeipa_rdn_ldap_attribute }}"
+          uuidLDAPAttribute: "{{ keycloak_freeipa_uuid_ldap_attribute }}"
+          userObjectClasses: "{{ keycloak_freeipa_user_object_classes }}"
+          connectionUrl: "{{ keycloak_freeipa_connection_url }}"
+          usersDn: "{{ keycloak_freeipa_users_dn }}"
+          authType: simple
+          bindDn: "{{ keycloak_freeipa_bind_dn }}"
+          bindCredential: "{{ keycloak_freeipa_bind_password }}"
+          searchScope: 1
+          validatePasswordPolicy: false
+          trustEmail: false
+          useTruststoreSpi: ldapsOnly
+          connectionPooling: true
+          pagination: true
+          allowKerberosAuthentication: false
+          debug: false
+          useKerberosForPasswordAuthentication: false
+        mappers:
+          - name: username
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: uid
+              user.model.attribute: username
+              is.mandatory.in.ldap: true
+              read.only: true
+              always.read.value.from.ldap: false
+              attribute.force.default: false
+              is.binary.attribute: false
+          - name: email
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: mail
+              user.model.attribute: email
+              is.mandatory.in.ldap: false
+              read.only: true
+              always.read.value.from.ldap: false
+              attribute.force.default: false
+              is.binary.attribute: false
+          - name: first name
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: givenName
+              user.model.attribute: firstName
+              is.mandatory.in.ldap: false
+              read.only: true
+              always.read.value.from.ldap: false
+              attribute.force.default: false
+              is.binary.attribute: false
+          - name: last name
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: sn
+              user.model.attribute: lastName
+              is.mandatory.in.ldap: false
+              read.only: true
+              always.read.value.from.ldap: false
+              attribute.force.default: false
+              is.binary.attribute: false
+          - name: freeipa-admins
+            providerId: group-ldap-mapper
+            config:
+              groups.dn: "{{ keycloak_freeipa_groups_dn }}"
+              group.name.ldap.attribute: cn
+              group.object.classes: groupOfNames
+              preserve.group.inheritance: true
+              membership.ldap.attribute: member
+              membership.attribute.type: DN
+              groups.ldap.filter: "(&(objectClass=groupOfNames)(cn={{ keycloak_freeipa_master_admins_ldap_group }}))"
+              mode: LDAP_ONLY
+              user.roles.retrieve.strategy: LOAD_GROUPS_BY_MEMBER_ATTRIBUTE
+              drop.non.existing.groups.during.sync: false
+              groups.path: "/{{ keycloak_freeipa_master_admins_keycloak_group_parent }}"
+
+    - name: Map the master admin role to the FreeIPA admins group
+      middleware_automation.keycloak.keycloak_realm_rolemapping:
+        realm: master
+        group_name: "{{ keycloak_freeipa_master_admins_ldap_group }}"
+        parents:
+          - name: "{{ keycloak_freeipa_master_admins_keycloak_group_parent }}"
+        roles:
+          - name: admin
+        state: present

@@ -1,0 +1,378 @@
+---
+# Global variables – these will be available to all jobs in both parent and child pipelines.
+variables:
+  ANSIBLE_HOST_KEY_CHECKING: "True"
+  ANSIBLE_HOST_PATTERN_MISMATCH: "error"
+  ANSIBLE_INVENTORY_ANY_UNPARSED_IS_FAILED: "True"
+  ANSIBLE_INVENTORY_UNPARSED_IS_FAILED: "True"
+  ANSIBLE_COLLECTIONS_PATH: ".ansible/collections:/usr/share/ansible/collections"
+  PLATFORM_CACHE_POLICY: "pull-push"
+  TF_PLUGIN_CACHE_DIR: "${CI_PROJECT_DIR}/.terraform.d/plugin-cache"
+  TF_INPUT: "false"
+  TOFU_IN_AUTOMATION: "true"
+
+# Template for Terraform/OpenTofu plan
+.tofu_plan:
+  stage: plan
+  cache:
+    key: "tofu-providers-${CI_PROJECT_ID}"
+    paths:
+      - .terraform.d/plugin-cache/
+    policy: pull-push
+  before_script:
+    - command -v tofu
+    - command -v python3
+    - command -v ssh-keygen
+    - mkdir -p "$TF_PLUGIN_CACHE_DIR"
+    - |
+      echo "CI diagnostic: runner=${CI_RUNNER_DESCRIPTION:-unknown} project=${CI_PROJECT_PATH:-unknown} ref=${CI_COMMIT_REF_NAME:-unknown} ref_protected=${CI_COMMIT_REF_PROTECTED:-unknown}"
+    - |
+      if [ -n "${OPENBAO_ID_TOKEN:-}" ]; then
+        python3 <<'PY'
+      import base64
+      import json
+      import os
+
+      try:
+          payload = os.environ["OPENBAO_ID_TOKEN"].split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+          selected = {
+              key: claims.get(key)
+              for key in ("iss", "aud", "project_path", "ref_protected", "ref_path")
+              if key in claims
+          }
+          print("OpenBao JWT claims: " + json.dumps(selected, sort_keys=True))
+      except Exception as exc:
+          print(f"OpenBao JWT claims: unable to decode safely ({exc})")
+      PY
+      fi
+    - |
+      if [ -n "${OPENBAO_SECRET_SPECS:-}" ]; then
+        openbao_env="$(mktemp)"
+        python3 shared/scripts/load_openbao_secrets.py "$openbao_env"
+        . "$openbao_env"
+        rm -f "$openbao_env"
+      fi
+    - |
+      : "${ANSIBLE_PRIVATE_KEY_FILE:?ANSIBLE_PRIVATE_KEY_FILE must be configured as a GitLab File variable}"
+      test -r "$ANSIBLE_PRIVATE_KEY_FILE"
+      chmod 600 "$ANSIBLE_PRIVATE_KEY_FILE"
+      export IPA_BOOTSTRAP_PRIVATE_KEY="$ANSIBLE_PRIVATE_KEY_FILE"
+      bootstrap_public_key="$(ssh-keygen -y -f "$ANSIBLE_PRIVATE_KEY_FILE")"
+      export TF_VAR_ssh_public_keys="$(python3 - "$TF_VAR_ssh_public_keys" "$bootstrap_public_key" <<'PY'
+      import json
+      import sys
+
+      keys = json.loads(sys.argv[1])
+      if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+          raise SystemExit("OpenBao ssh_public_keys must be a JSON list of strings")
+      bootstrap_key = sys.argv[2].strip()
+      keys = [key for key in keys if key.strip() != bootstrap_key]
+      keys.append(bootstrap_key)
+      print(json.dumps(keys, separators=(",", ":")))
+      PY
+      )"
+      export KRB5_CONFIG="${CI_PROJECT_DIR}/.ipa-krb5.conf"
+      {
+        printf '[libdefaults]\n default_realm = %s\n dns_lookup_kdc = true\n dns_lookup_realm = false\n udp_preference_limit = 1\n' "$IPA_CLIENT_REALM"
+        printf '[realms]\n %s = {\n' "$IPA_CLIENT_REALM"
+        for server in $IPA_CLIENT_SERVERS; do printf '  kdc = %s\n  admin_server = %s\n' "$server" "$server"; done
+        printf '}\n[domain_realm]\n .example.test = %s\n example.test = %s\n' "$IPA_CLIENT_REALM" "$IPA_CLIENT_REALM"
+      } > "$KRB5_CONFIG"
+  script:
+    - env | grep '^TF_VAR_' | cut -d= -f1 | sort
+    - cd "services/${SERVICE}/terraform"
+    - state_name="${TF_STATE_NAME:-${SERVICE}}"
+    - |
+      if grep -q 'backend "pg"' versions.tf; then
+        : "${PGPASSWORD:?terraform_state_password must be configured in OpenBao}"
+        export PG_CONN_STR="postgresql://terraform_state@postgresql.example.test:5432/terraform_state?sslmode=disable"
+        export PG_SCHEMA_NAME="terraform_$(printf '%s' "$state_name" | tr -c '[:alnum:]_' '_')"
+      else
+        backend_username="${TF_HTTP_USERNAME:-${GITLAB_TERRAFORM_STATE_USERNAME:-gitlab-ci-token}}"
+        backend_password="${TF_HTTP_PASSWORD:-${GITLAB_TERRAFORM_STATE_PASSWORD:-${CI_JOB_TOKEN:-}}}"
+        test -n "$backend_password"
+        export TF_HTTP_ADDRESS="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${state_name}"
+        export TF_HTTP_LOCK_ADDRESS="${TF_HTTP_ADDRESS}/lock"
+        export TF_HTTP_UNLOCK_ADDRESS="${TF_HTTP_ADDRESS}/lock"
+        export TF_HTTP_USERNAME="$backend_username"
+        export TF_HTTP_PASSWORD="$backend_password"
+        export TF_HTTP_LOCK_METHOD="POST"
+        export TF_HTTP_UNLOCK_METHOD="DELETE"
+        export TF_HTTP_RETRY_WAIT_MIN="5"
+      fi
+    - |
+      tofu init -reconfigure
+    - tofu plan -out=tfplan
+    - tofu show -no-color tfplan > tfplan.txt
+  artifacts:
+    paths:
+      - services/${SERVICE}/terraform/.terraform
+      - services/${SERVICE}/terraform/.terraform.lock.hcl
+      - services/${SERVICE}/terraform/tfplan
+      - services/${SERVICE}/terraform/tfplan.txt
+    expire_in: 1 hour
+
+# Template for Terraform/OpenTofu apply
+.tofu_apply:
+  stage: deploy
+  cache:
+    key: "tofu-providers-${CI_PROJECT_ID}"
+    paths:
+      - .terraform.d/plugin-cache/
+    policy: pull-push
+  before_script:
+    - command -v tofu
+    - command -v python3
+    - mkdir -p "$TF_PLUGIN_CACHE_DIR"
+    - |
+      if [ -n "${OPENBAO_SECRET_SPECS:-}" ]; then
+        openbao_env="$(mktemp)"
+        python3 shared/scripts/load_openbao_secrets.py "$openbao_env"
+        . "$openbao_env"
+        rm -f "$openbao_env"
+      fi
+    - command -v ssh-keygen
+    - |
+      : "${ANSIBLE_PRIVATE_KEY_FILE:?ANSIBLE_PRIVATE_KEY_FILE must be configured as a GitLab File variable}"
+      test -r "$ANSIBLE_PRIVATE_KEY_FILE"
+      chmod 600 "$ANSIBLE_PRIVATE_KEY_FILE"
+      export IPA_BOOTSTRAP_PRIVATE_KEY="$ANSIBLE_PRIVATE_KEY_FILE"
+      bootstrap_public_key="$(ssh-keygen -y -f "$ANSIBLE_PRIVATE_KEY_FILE")"
+      export TF_VAR_ssh_public_keys="$(python3 - "$TF_VAR_ssh_public_keys" "$bootstrap_public_key" <<'PY'
+      import json
+      import sys
+
+      keys = json.loads(sys.argv[1])
+      if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+          raise SystemExit("OpenBao ssh_public_keys must be a JSON list of strings")
+      bootstrap_key = sys.argv[2].strip()
+      keys = [key for key in keys if key.strip() != bootstrap_key]
+      keys.append(bootstrap_key)
+      print(json.dumps(keys, separators=(",", ":")))
+      PY
+      )"
+      export KRB5_CONFIG="${CI_PROJECT_DIR}/.ipa-krb5.conf"
+      {
+        printf '[libdefaults]\n default_realm = %s\n dns_lookup_kdc = true\n dns_lookup_realm = false\n udp_preference_limit = 1\n' "$IPA_CLIENT_REALM"
+        printf '[realms]\n %s = {\n' "$IPA_CLIENT_REALM"
+        for server in $IPA_CLIENT_SERVERS; do printf '  kdc = %s\n  admin_server = %s\n' "$server" "$server"; done
+        printf '}\n[domain_realm]\n .example.test = %s\n example.test = %s\n' "$IPA_CLIENT_REALM" "$IPA_CLIENT_REALM"
+      } > "$KRB5_CONFIG"
+      export IPA_ENROLLER_PRINCIPAL="ipa-enroller@${IPA_CLIENT_REALM}"
+      test -r "$KRB5_CONFIG"
+    - |
+      case "$SERVICE" in
+        freeipa|netbox) ;;
+        *)
+          if ! command -v ipa >/dev/null 2>&1; then
+            echo "FreeIPA CLI is missing on this GitLab Runner (install freeipa-client)." >&2
+            exit 1
+          fi
+          if ! command -v kinit >/dev/null 2>&1; then
+            echo "Kerberos CLI is missing on this GitLab Runner (install krb5-user or krb5-workstation)." >&2
+            exit 1
+          fi
+          ;;
+      esac
+  script:
+    - cd "services/${SERVICE}/terraform"
+    - state_name="${TF_STATE_NAME:-${SERVICE}}"
+    - |
+      if grep -q 'backend "pg"' versions.tf; then
+        : "${PGPASSWORD:?terraform_state_password must be configured in OpenBao}"
+        export PG_CONN_STR="postgresql://terraform_state@postgresql.example.test:5432/terraform_state?sslmode=disable"
+        export PG_SCHEMA_NAME="terraform_$(printf '%s' "$state_name" | tr -c '[:alnum:]_' '_')"
+      else
+        backend_username="${TF_HTTP_USERNAME:-${GITLAB_TERRAFORM_STATE_USERNAME:-gitlab-ci-token}}"
+        backend_password="${TF_HTTP_PASSWORD:-${GITLAB_TERRAFORM_STATE_PASSWORD:-${CI_JOB_TOKEN:-}}}"
+        test -n "$backend_password"
+        export TF_HTTP_ADDRESS="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${state_name}"
+        export TF_HTTP_LOCK_ADDRESS="${TF_HTTP_ADDRESS}/lock"
+        export TF_HTTP_UNLOCK_ADDRESS="${TF_HTTP_ADDRESS}/lock"
+        export TF_HTTP_USERNAME="$backend_username"
+        export TF_HTTP_PASSWORD="$backend_password"
+        export TF_HTTP_LOCK_METHOD="POST"
+        export TF_HTTP_UNLOCK_METHOD="DELETE"
+        export TF_HTTP_RETRY_WAIT_MIN="5"
+      fi
+    - |
+      if [ ! -d .terraform ]; then
+        echo "Missing .terraform artifact from plan job." >&2
+        exit 1
+      fi
+    - 'echo "Using Terraform state: ${state_name}"'
+    - tofu init -reconfigure
+    - tofu apply -auto-approve tfplan
+
+# Template for Ansible configuration
+.ansible_configure:
+  stage: deploy
+  cache:
+    key:
+      files:
+        - shared/ansible/collections/requirements.yml
+    paths:
+      - .ansible/collections/
+    policy: pull-push
+  before_script:
+    - command -v ansible-playbook
+    - command -v ansible-inventory
+    - command -v ansible-galaxy
+    - command -v ssh-keygen
+    - |
+      ansible_collections_path="${CI_PROJECT_DIR}/.ansible/collections"
+      mkdir -p "$ansible_collections_path"
+      ansible-galaxy collection install \
+        -r shared/ansible/collections/requirements.yml \
+        -p "$ansible_collections_path"
+      export ANSIBLE_COLLECTIONS_PATH="$ansible_collections_path:/usr/share/ansible/collections"
+    - |
+      if [ -n "${OPENBAO_SECRET_SPECS:-}" ]; then
+        openbao_env="$(mktemp)"
+        python3 shared/scripts/load_openbao_secrets.py "$openbao_env"
+        . "$openbao_env"
+        rm -f "$openbao_env"
+      fi
+    - python3 -c "import pytz"
+    - python3 -c "import hvac"
+  script:
+    - |
+      export NETBOX_API="${NETBOX_API%/}"
+      export NETBOX_VALIDATE_CERTS="${NETBOX_VALIDATE_CERTS:-true}"
+      if [ -z "$NETBOX_API" ]; then
+        echo "NETBOX_API is empty. Configure the runner's reachable NetBox API URL." >&2
+        exit 1
+      fi
+
+      if [ -z "$NETBOX_TOKEN" ]; then
+        echo "NETBOX_TOKEN is empty. Declare it in OpenBao common_secrets." >&2
+        exit 1
+      fi
+      python3 - "$NETBOX_API" <<'PY'
+      import socket
+      import sys
+      from urllib.parse import urlparse
+
+      url = sys.argv[1]
+      parsed = urlparse(url)
+      host = parsed.hostname
+      if not parsed.scheme or not host:
+          print(f"NETBOX_API must be an absolute URL, got: {url}", file=sys.stderr)
+          sys.exit(1)
+      try:
+          socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+      except OSError as exc:
+          print(f"Cannot resolve NetBox host {host!r} from GitLab runner: {exc}", file=sys.stderr)
+          print("Use an internal NetBox URL reachable from the runner via NETBOX_API.", file=sys.stderr)
+          sys.exit(1)
+      PY
+    - |
+      if [ "${ANSIBLE_AUTH_MODE:-key}" = "password" ]; then
+        : "${ANSIBLE_CI_PASSWORD:?ANSIBLE_CI_PASSWORD must be provided by OpenBao}"
+        : "${ANSIBLE_PRIVATE_KEY_FILE:?ANSIBLE_PRIVATE_KEY_FILE must be provided by OpenBao}"
+        test -r "$ANSIBLE_PRIVATE_KEY_FILE"
+        key_dir="${CI_PROJECT_DIR}.tmp"
+        key_file="${key_dir}/ansible_private_key"
+        mkdir -p "$key_dir"
+        umask 077
+        tr -d '\r' < "$ANSIBLE_PRIVATE_KEY_FILE" > "$key_file"
+        chmod 600 "$key_file"
+        if ! ssh-keygen -y -f "$key_file" >/dev/null; then
+          echo "ANSIBLE_PRIVATE_KEY_FILE is not a valid unencrypted OpenSSH private key." >&2
+          exit 1
+        fi
+        export ANSIBLE_USER=ansible-ci
+        export ANSIBLE_PRIVATE_KEY_FILE=""
+        export ANSIBLE_FALLBACK_PRIVATE_KEY_FILE="$key_file"
+        export ANSIBLE_SSH_COMMON_ARGS="-o StrictHostKeyChecking=accept-new -o GSSAPIAuthentication=no -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -o PasswordAuthentication=yes"
+      elif [ "${ANSIBLE_AUTH_MODE:-key}" = "ipa" ]; then
+        echo "Kerberos keytab authentication is no longer supported; use ANSIBLE_AUTH_MODE=key or password." >&2
+        exit 1
+      elif [ -z "${ANSIBLE_PRIVATE_KEY_FILE:-}" ]; then
+        echo "ANSIBLE_PRIVATE_KEY_FILE must be configured as a GitLab CI/CD File variable." >&2
+        exit 1
+      elif [ ! -r "$ANSIBLE_PRIVATE_KEY_FILE" ]; then
+        echo "ANSIBLE_PRIVATE_KEY_FILE does not point to a readable file: $ANSIBLE_PRIVATE_KEY_FILE" >&2
+        exit 1
+      else
+        key_dir="${CI_PROJECT_DIR}.tmp"
+        key_file="${key_dir}/ansible_private_key"
+        mkdir -p "$key_dir"
+        umask 077
+        tr -d '\r' < "$ANSIBLE_PRIVATE_KEY_FILE" > "$key_file"
+        chmod 600 "$key_file"
+        if ! ssh-keygen -y -f "$key_file" >/dev/null; then
+          echo "ANSIBLE_PRIVATE_KEY_FILE is not a valid unencrypted OpenSSH private key." >&2
+          echo "Configure it as a GitLab File variable containing the full multiline private key, not a public key, path, or escaped newline string." >&2
+          exit 1
+        fi
+        export ANSIBLE_USER=root
+        export ANSIBLE_PRIVATE_KEY_FILE="$key_file"
+      fi
+      ansible_known_hosts="${CI_PROJECT_DIR}/.ansible-known_hosts"
+      : > "$ansible_known_hosts"
+      chmod 600 "$ansible_known_hosts"
+      export ANSIBLE_SSH_COMMON_ARGS="${ANSIBLE_SSH_COMMON_ARGS:-} -o UserKnownHostsFile=$ansible_known_hosts -o KnownHostsCommand=none -o ControlMaster=no -o ControlPath=none"
+    - |
+      ansible_limit="$ANSIBLE_LIMIT"
+      case "${CI_JOB_NAME:-}" in
+        configure:*:*:*)
+          rollout_job="${CI_JOB_NAME#configure:}"
+          rollout_service="${rollout_job%%:*}"
+          rollout_job="${rollout_job#*:}"
+          rollout_cluster="${rollout_job%%:*}"
+          rollout_contour="${rollout_job#*:}"
+          rollout_service="$(printf '%s' "$rollout_service" | tr '_' '-')"
+          if [ -z "${ROLLOUT_ANSIBLE_LIMIT:-}" ]; then
+            ansible_limit="${rollout_service}-${rollout_cluster}-${rollout_contour}-*"
+          fi
+          export DEPLOYMENT_CONTOUR="$rollout_contour"
+          ;;
+      esac
+      echo "Ansible playbook target: $ansible_limit"
+      export ANSIBLE_LIMIT="$ansible_limit"
+      ansible-inventory -i shared/ansible/inventory/netbox.yml --list --export > /dev/null
+      ansible-playbook -i shared/ansible/inventory/netbox.yml "$PLAYBOOK" --syntax-check --limit "$ansible_limit"
+      if [ -n "${ANSIBLE_CHECK_FLAGS:-}" ]; then
+        ansible-playbook -i shared/ansible/inventory/netbox.yml "$PLAYBOOK" --limit "$ansible_limit" $ANSIBLE_CHECK_FLAGS
+      else
+        ansible-playbook -i shared/ansible/inventory/netbox.yml "$PLAYBOOK" --limit "$ansible_limit"
+      fi
+
+# Platform bootstrap/Kolla jobs intentionally do not require NetBox.
+.platform_configure:
+  stage: deploy
+  cache:
+    key:
+      files:
+        - shared/ansible/collections/requirements.yml
+        - environments/example/platform.yaml
+    paths:
+      - .ansible/collections/
+      - .ansible/.kolla-requirements.sha256
+      - .ci-kolla-ansible/
+    policy: $PLATFORM_CACHE_POLICY
+  before_script:
+    - command -v ansible-playbook
+    - command -v ansible-galaxy
+    - |
+      ansible_collections_path="${CI_PROJECT_DIR}/.ansible/collections"
+      mkdir -p "$ansible_collections_path"
+      ansible-galaxy collection install \
+        -r shared/ansible/collections/requirements.yml \
+        -p "$ansible_collections_path"
+      export ANSIBLE_COLLECTIONS_PATH="$ansible_collections_path:/usr/share/ansible/collections"
+    - |
+      if [ -n "${OPENBAO_SECRET_SPECS:-}" ]; then
+        openbao_env="$(mktemp)"
+        python3 shared/scripts/load_openbao_secrets.py "$openbao_env"
+        . "$openbao_env"
+        rm -f "$openbao_env"
+      fi
+    - |
+      export ANSIBLE_USER="${ANSIBLE_USER:-root}"
+      : "${ANSIBLE_PRIVATE_KEY_FILE:?ANSIBLE_PRIVATE_KEY_FILE must be provided by OpenBao}"
+      test -r "$ANSIBLE_PRIVATE_KEY_FILE"
+      chmod 600 "$ANSIBLE_PRIVATE_KEY_FILE"

@@ -1,0 +1,9 @@
+---
+galaxy_info:
+  author: drg
+  description: Deploy OAuth2 Proxy for Keycloak-backed Traefik forward authentication.
+  license: MIT
+  min_ansible_version: "2.15"
+
+dependencies:
+  - role: debian_mirrors

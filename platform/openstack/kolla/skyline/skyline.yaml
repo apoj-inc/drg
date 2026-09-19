@@ -1,0 +1,6 @@
+---
+# Merged into Kolla's generated Skyline configuration.
+# Keep Skyline's public Keystone URL for browser SSO, while using the
+# internal Keystone catalog for Skyline's server-side OpenStack API calls.
+openstack:
+  interface_type: internal

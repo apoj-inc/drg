@@ -1,0 +1,6 @@
+---
+- name: Validate Docker Compose file
+  ansible.builtin.command: docker compose config --quiet
+  args:
+    chdir: "{{ compose_app_root }}"
+  changed_when: false

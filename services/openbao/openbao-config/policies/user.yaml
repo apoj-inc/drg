@@ -1,0 +1,7 @@
+---
+name: user
+rules:
+  - path: kv/data/shared/*
+    capabilities: [read]
+  - path: kv/metadata/shared/*
+    capabilities: [list]

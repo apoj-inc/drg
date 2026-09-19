@@ -1,0 +1,6 @@
+---
+- name: Reconcile compose app after configuration change
+  community.docker.docker_compose_v2:
+    project_src: "{{ compose_app_handler_project_src }}"
+    state: "{{ compose_app_handler_state | default('present') }}"
+    remove_orphans: "{{ compose_app_handler_remove_orphans | default(false) }}"

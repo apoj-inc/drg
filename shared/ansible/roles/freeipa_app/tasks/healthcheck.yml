@@ -1,0 +1,28 @@
+---
+- name: Wait for FreeIPA web UI to respond
+  ansible.builtin.uri:
+    url: "{{ freeipa_healthcheck_url }}"
+    method: GET
+    status_code: [200, 301, 302, 401]
+    follow_redirects: none
+    validate_certs: false
+  register: freeipa_health_result
+  until: freeipa_health_result.status in [200, 301, 302, 401]
+  retries: 12
+  delay: 10
+
+- name: Run targeted native FreeIPA health checks
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - "{{ freeipa_iac_healthcheck_timeout }}"
+      - ipa-healthcheck
+      - --source
+      - "{{ item }}"
+      - --failures-only
+      - --output-type
+      - human
+  loop: "{{ freeipa_iac_healthcheck_sources }}"
+  register: freeipa_healthcheck_command
+  changed_when: false
+  failed_when: freeipa_healthcheck_command.rc != 0

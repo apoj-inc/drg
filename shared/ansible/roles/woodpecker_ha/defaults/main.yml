@@ -1,0 +1,6 @@
+---
+woodpecker_ha_resource_setup_path: /usr/local/sbin/woodpecker-ha-resource-setup
+woodpecker_ha_control_path: /usr/local/sbin/woodpecker-ha-control
+woodpecker_ha_compose_dir: /opt/woodpecker
+woodpecker_ha_http_port: 8000
+woodpecker_ha_public_key_file: /etc/woodpecker/extension-public-key.pem

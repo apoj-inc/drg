@@ -1,0 +1,109 @@
+---
+service:
+  name: netbox
+  topology: replicated
+  description: NetBox infrastructure source-of-truth service.
+  tags: [opentofu, netbox, traefik-managed-route]
+
+rollout:
+  by_contour: true
+
+startup:
+  order: 80
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1002
+      B:
+        start: 1012
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+    keyctl: false
+    fuse: false
+
+compute:
+  cpu_cores: 2
+  memory_mb: 4096
+  swap_mb: 1024
+  disk_gb: 100
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: app
+      dns_name_pattern: netbox-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: netbox.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+netbox:
+  external_url: https://netbox.example.test
+  allowed_hosts: netbox.example.test
+  listen_address: 0.0.0.0
+  http_port: 8000
+  docker_version: release
+  postgresql:
+    host: postgresql.example.test
+    port: 5432
+    database: netbox
+    username: netbox
+  oidc:
+    provider: authentik
+    scope: openid profile email roles
+    issuer_url: https://auth.example.test/application/o/netbox/
+    client_id: netbox
+    logout_redirect_url: https://auth.example.test/application/o/netbox/end-session/
+    keycloak:
+      issuer_url: https://keycloak.example.test/realms/drg
+      client_id: netbox
+      logout_redirect_url: https://keycloak.example.test/realms/drg/protocol/openid-connect/logout
+  redis:
+    host: redis.example.test
+    port: 6379
+    database: 0
+    cache_database: 1
+
+secrets:
+  path: kv/services/netbox
+  fields:
+    - netbox_secret_key
+    - netbox_api_token_pepper
+    - netbox_postgres_password
+    - netbox_superuser_name
+    - netbox_superuser_email
+    - netbox_superuser_password
+    - netbox_superuser_api_token
+    - authentik_client_secret
+    - keycloak_netbox_client_secret
+
+secret_imports:
+  - path: kv/services/redis
+    fields:
+      - redis_password
+
+freeipa_client:
+  hostgroups: [service-netbox]

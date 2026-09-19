@@ -1,0 +1,34 @@
+---
+- name: Read declared OpenBao CA state
+  community.hashi_vault.vault_read:
+    url: "{{ openbao_api_addr }}"
+    path: >-
+      {{ openbao_engine.mount }}/{{ 'config/ca' if openbao_ca_kind == 'ssh' else 'config/ca' }}
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: openbao_ca_state
+  changed_when: false
+  failed_when: false
+  when:
+    - openbao_engine.ca is defined
+    - openbao_engine.type == openbao_ca_kind
+
+- name: Initialize declared OpenBao CA
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: >-
+      {{ openbao_engine.mount }}/{{ 'config/ca' if openbao_ca_kind == 'ssh' else 'root/generate/internal' }}
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data: "{{ openbao_engine.ca }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - openbao_engine.ca is defined
+    - openbao_engine.type == openbao_ca_kind
+    - openbao_ca_state.failed | default(false)
+  no_log: true

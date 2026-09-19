@@ -1,0 +1,33 @@
+ui = true
+api_addr = "{{ openbao_api_addr }}"
+cluster_addr = "{{ openbao_cluster_addr }}"
+
+listener "tcp" {
+  address         = "{{ openbao_listen_address }}:{{ openbao_http_port }}"
+  cluster_address = "{{ openbao_listen_address }}:8201"
+  tls_disable     = true
+
+  telemetry {
+    unauthenticated_metrics_access = true
+  }
+}
+
+listener "tcp" {
+  address         = "{{ openbao_listen_address }}:{{ openbao_mtls_port }}"
+  tls_disable     = false
+  tls_cert_file   = "/openbao/tls/server.crt"
+  tls_key_file    = "/openbao/tls/server.key"
+  tls_client_ca_file = "/openbao/tls/freeipa-ca.crt"
+  tls_require_and_verify_client_cert = true
+}
+
+telemetry {
+  prometheus_retention_time = "24h"
+  disable_hostname = true
+}
+
+storage "postgresql" {
+  connection_url = "postgres://{{ openbao_postgresql_username | urlencode }}:{{ openbao_postgresql_password | urlencode }}@{{ openbao_postgresql_host }}:{{ openbao_postgresql_port }}/{{ openbao_postgresql_database | urlencode }}?sslmode={{ openbao_postgresql_sslmode | urlencode }}"
+  table          = "{{ openbao_postgresql_table }}"
+  ha_enabled     = "{{ openbao_postgresql_ha_enabled | string | lower }}"
+}

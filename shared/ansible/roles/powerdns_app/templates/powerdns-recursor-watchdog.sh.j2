@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+compose_dir={{ powerdns_compose_dir | quote }}
+metrics_url={{ ('http://127.0.0.1:' ~ (powerdns_recursor_metrics_port | string) ~ '/metrics') | quote }}
+
+if curl --fail --silent --show-error --max-time 10 --output /dev/null "${metrics_url}"; then
+  exit 0
+fi
+
+logger -t powerdns-recursor-watchdog "recursor health check failed; recreating container"
+cd "${compose_dir}"
+docker compose up -d --no-deps --force-recreate powerdns-recursor

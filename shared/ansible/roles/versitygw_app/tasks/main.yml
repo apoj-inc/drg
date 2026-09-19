@@ -1,0 +1,191 @@
+---
+- name: Validate VersityGW credentials
+  ansible.builtin.assert:
+    that:
+      - versitygw_root_access_key | length > 0
+      - versitygw_root_secret_key | length > 0
+      - versitygw_forgejo_access_key | length > 0
+      - versitygw_forgejo_secret_key | length > 0
+      - versitygw_grafana_access_key | length > 0
+      - versitygw_grafana_secret_key | length > 0
+      - versitygw_root_access_key is match('^[A-Za-z0-9]+$')
+      - versitygw_forgejo_access_key is match('^[A-Za-z0-9]+$')
+      - versitygw_grafana_access_key is match('^[A-Za-z0-9]+$')
+    fail_msg: "VersityGW credentials must be supplied through OpenBao; access keys may contain only ASCII letters and digits."
+  no_log: true
+
+- name: Validate VersityGW storage mode
+  ansible.builtin.assert:
+    that:
+      - versitygw_storage_mode in ['local_disk', 'nfs']
+    fail_msg: "VersityGW storage mode must be local_disk or nfs."
+
+- name: Ensure VersityGW directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "1000"
+    group: "1000"
+    mode: "0750"
+  loop:
+    - "{{ versitygw_compose_dir }}"
+    - "{{ versitygw_data_dir }}"
+    - "{{ versitygw_iam_dir }}"
+    - "{{ versitygw_versioning_dir }}"
+
+- name: Render VersityGW environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ versitygw_compose_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart VersityGW
+
+- name: Render VersityGW Compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ versitygw_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart VersityGW
+
+- name: Start VersityGW
+  community.docker.docker_compose_v2:
+    project_src: "{{ versitygw_compose_dir }}"
+    state: present
+    pull: missing
+
+- name: Wait for VersityGW API
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ versitygw_port }}/"
+    status_code: [200, 400, 403, 404]
+  register: versitygw_health
+  until: versitygw_health.status in [200, 400, 403, 404]
+  retries: 30
+  delay: 5
+
+- name: Wait for VersityGW admin API
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ versitygw_admin_port }}/"
+    status_code: [200, 400, 401, 403, 404, 500]
+  register: versitygw_admin_health
+  until: versitygw_admin_health.status in [200, 400, 401, 403, 404, 500]
+  retries: 30
+  delay: 5
+
+- name: Check Forgejo S3 user
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} list-users
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+  register: versitygw_users
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create Forgejo S3 user
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} create-user
+    --access "$FORGEJO_ACCESS_KEY" --secret "$FORGEJO_SECRET_KEY" --role user
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+    FORGEJO_ACCESS_KEY: "{{ versitygw_forgejo_access_key }}"
+    FORGEJO_SECRET_KEY: "{{ versitygw_forgejo_secret_key }}"
+  when: versitygw_forgejo_access_key not in (versitygw_users.stdout | default(''))
+  changed_when: true
+  no_log: true
+
+- name: Check Forgejo S3 bucket
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} list-buckets
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+  register: versitygw_buckets
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Create Forgejo S3 bucket
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} create-bucket
+    --bucket "$FORGEJO_BUCKET" --owner "$FORGEJO_ACCESS_KEY"
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+    FORGEJO_ACCESS_KEY: "{{ versitygw_forgejo_access_key }}"
+    FORGEJO_BUCKET: "{{ versitygw_forgejo_bucket }}"
+  when: versitygw_forgejo_bucket not in (versitygw_buckets.stdout | default(''))
+  changed_when: true
+  no_log: true
+
+- name: Assign Forgejo S3 bucket ownership
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} change-bucket-owner
+    --bucket "$FORGEJO_BUCKET" --owner "$FORGEJO_ACCESS_KEY"
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+    FORGEJO_ACCESS_KEY: "{{ versitygw_forgejo_access_key }}"
+    FORGEJO_BUCKET: "{{ versitygw_forgejo_bucket }}"
+  changed_when: false
+  no_log: true
+
+- name: Create Grafana S3 user
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} create-user
+    --access "$GRAFANA_ACCESS_KEY" --secret "$GRAFANA_SECRET_KEY" --role user
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+    GRAFANA_ACCESS_KEY: "{{ versitygw_grafana_access_key }}"
+    GRAFANA_SECRET_KEY: "{{ versitygw_grafana_secret_key }}"
+  when: versitygw_grafana_access_key not in (versitygw_users.stdout | default(''))
+  changed_when: true
+  no_log: true
+
+- name: Create Grafana Prometheus snapshots bucket
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} create-bucket
+    --bucket "$GRAFANA_BUCKET" --owner "$GRAFANA_ACCESS_KEY"
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+    GRAFANA_ACCESS_KEY: "{{ versitygw_grafana_access_key }}"
+    GRAFANA_BUCKET: "{{ versitygw_grafana_bucket }}"
+  when: versitygw_grafana_bucket not in (versitygw_buckets.stdout | default(''))
+  changed_when: true
+  no_log: true
+
+- name: Assign Grafana snapshots bucket ownership
+  ansible.builtin.shell: >-
+    docker compose -f {{ versitygw_compose_dir }}/docker-compose.yml exec -T versitygw
+    versitygw admin --access "$ROOT_ACCESS_KEY" --secret "$ROOT_SECRET_KEY"
+    --endpoint-url http://127.0.0.1:{{ versitygw_admin_port }} change-bucket-owner
+    --bucket "$GRAFANA_BUCKET" --owner "$GRAFANA_ACCESS_KEY"
+  environment:
+    ROOT_ACCESS_KEY: "{{ versitygw_root_access_key }}"
+    ROOT_SECRET_KEY: "{{ versitygw_root_secret_key }}"
+    GRAFANA_ACCESS_KEY: "{{ versitygw_grafana_access_key }}"
+    GRAFANA_BUCKET: "{{ versitygw_grafana_bucket }}"
+  changed_when: false
+  no_log: true

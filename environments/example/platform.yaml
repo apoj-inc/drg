@@ -1,0 +1,197 @@
+---
+openbao:
+  server_url: https://openbao.example.test
+  auth_path: gitlab-ci
+  auth_role: ci
+  id_token_name: OPENBAO_ID_TOKEN
+  forgejo_auth_path: forgejo-actions
+  forgejo_auth_role: ci
+  forgejo_audience: https://openbao.example.test
+  common_secrets:
+    file_fields:
+      ansible_private_key_file: plain
+    fields:
+      - proxmox_api_token
+      - root_password
+      - ssh_public_keys
+      - netbox_token
+      - ansible_private_key_file
+      - ansible_ci_password
+      - ipa_enroller_password
+      - terraform_state_password
+
+egress_proxy:
+  https: http://198.51.100.250:3128
+
+clusters:
+  example-cluster:
+    state_name: example-cluster
+    proxmox:
+      endpoint: https://proxmox.example.test
+      insecure: false
+    nodes:
+      pve-node-a:
+        management_ip: 198.51.100.2
+        loopback: 203.0.113.2/32
+        fabric_ip: 198.51.100.2/24
+        fabric_interfaces:
+          - vmbr0
+    defaults:
+      disk_datastore: local-lvm
+      cloudinit_datastore: local-lvm
+      cloudinit_template_vm_id: 9000
+      cloudinit_template_node: pve-node-a
+      openfabric_fabric_prefix: 198.51.100.0/24
+      openfabric_exit_nodes:
+        - pve-node-a
+      openfabric_primary_exit_node: pve-node-a
+      openfabric_exit_nodes_local_routing: false
+      cloudinit_images:
+        debian_13:
+          url: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+          filename: debian-13-genericcloud-amd64.qcow2
+        fedora_44:
+          url: https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2
+          filename: Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2
+    networks:
+      management:
+        bridge: vmbr0
+        prefix: 198.51.100.0/24
+        gateway: 198.51.100.1
+      app:
+        bridge: prodapp
+        vnet: prod-app
+        vrf: vrf-prod
+        prefix: 198.51.100.0/24
+        gateway: 198.51.100.1
+        mtu: 9000
+        dns_zone: example.test
+        # NetBox DNS creates this zone and managed PTR records during VM registration.
+        dns_reverse_zone: 2.0.192.in-addr.arpa
+        dns_reverse_nameservers:
+          - powerdns-node-a.example.test
+          - powerdns-node-b.example.test
+        dns_reverse_soa_mname: powerdns-node-a.example.test
+        dns_reverse_soa_rname: hostmaster.example.test
+
+dns:
+  default_ttl: 60
+  servers: [198.51.100.100, 198.51.100.101]
+  domain: example.test
+  traefik_dns_targets:
+    - traefik.example.test
+
+rollout_contours:
+  A:
+    order: 10
+    description: First rollout wave.
+  B:
+    order: 20
+    description: Second rollout wave.
+  C:
+    order: 30
+    description: Third rollout wave.
+
+netbox:
+  enabled: true
+  url: https://netbox.example.test
+  validate_certs: true
+  site: example
+  cluster_by_proxmox_cluster:
+    example-cluster: example-cluster
+
+# Shared client-enrollment configuration. FreeIPA servers are the bootstrap
+# dependency and are excluded from joining their own domain.
+freeipa_client:
+  enabled: true
+  excluded_services: [freeipa]
+  domain: example.test
+  realm: EXAMPLE.TEST
+  servers:
+    - freeipa-node-a.example.test
+    - freeipa-node-b.example.test
+  hostgroup: managed-linux
+  require_dns: true
+
+openstack:
+  enabled: true
+  manual_apply: false
+  release: "2026.1"
+
+  host:
+    name: openstack-node-01
+    hostname: openstack-node-01
+    management_ip: 192.0.2.2
+    management_network: management
+    management_bridge: br0
+    roles: [control, network, compute, storage, monitoring]
+    virtualization:
+      type: kvm
+      device: /dev/kvm
+    storage:
+      cinder:
+        device: /dev/nvme0n1
+        partition: 4
+        partition_start: 177257472KiB
+        partition_end: 468GiB
+        volume_group: cinder-volumes
+    network:
+      provider:
+        bridge_end: veth-br0
+        neutron_end: veth-neutron
+
+  bootstrap:
+    allow_storage_changes: false
+    allow_network_changes: false
+
+  kolla:
+    virtualenv: .ci-kolla-ansible
+    kolla_ansible_version: "22.1.0"
+    use_test_images: true
+    internal_vip: 192.0.2.5
+    management_interface: br0
+    external_interface: veth-neutron
+    neutron_plugin_agent: ovn
+    nova_compute_virt_type: kvm
+    cinder_backend: lvm
+    services:
+      keystone: true
+      glance: true
+      nova: true
+      placement: true
+      neutron: true
+      cinder: true
+      horizon: true
+      skyline: true
+
+  foundation:
+    enabled: true
+    auth_url: https://openstack.example.test/v3
+    region: RegionOne
+    components: [identity, network, security, compute-catalog, images]
+
+  dns:
+    zone: example.test
+    ttl: 60
+    records:
+      - hostname: openstack.example.test
+        record_type: CNAME
+        target: traefik.example.test
+      - hostname: horizon.example.test
+        record_type: CNAME
+        target: traefik.example.test
+      - hostname: skyline.example.test
+        record_type: CNAME
+        target: traefik.example.test
+
+  smoke:
+    enabled: true
+    required_services: [keystone, glance, nova, placement, neutron, cinder]
+
+  secrets:
+    path: kv/platform/openstack
+    file_fields:
+      kolla_passwords: base64
+    fields:
+      - kolla_passwords
+      - authentik_openstack_client_secret

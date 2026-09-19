@@ -1,0 +1,22 @@
+---
+- name: Deploy etcd
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('etcd', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    etcd_client_port: "{{ etcd.client_port }}"
+    etcd_peer_port: "{{ etcd.peer_port }}"
+    etcd_listen_address: "{{ etcd.listen_address }}"
+    etcd_data_dir: "{{ etcd.data_dir }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - etcd_app
+    - monitoring_agent
+    - logging_agent

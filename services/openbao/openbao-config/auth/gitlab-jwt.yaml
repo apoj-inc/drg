@@ -1,0 +1,20 @@
+---
+mount: gitlab-ci
+type: jwt
+description: GitLab CI job JWT authentication.
+config:
+  oidc_discovery_url: https://git.example.test
+  bound_issuer: https://git.example.test
+  default_role: ci
+roles:
+  - name: ci
+    role_type: jwt
+    user_claim: project_path
+    bound_claims_type: string
+    bound_claims:
+      project_path: dwarves/drg
+      ref_protected: "false"
+    bound_audiences: [https://openbao.example.test]
+    token_policies: [ci]
+    token_ttl: 15m
+    token_max_ttl: 30m

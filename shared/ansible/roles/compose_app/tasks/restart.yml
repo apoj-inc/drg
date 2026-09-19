@@ -1,0 +1,10 @@
+---
+- name: Restart compose app explicitly
+  community.docker.docker_compose_v2:
+    project_src: "{{ compose_app_root }}"
+    files:
+      - "{{ compose_app_compose_file | basename }}"
+    state: restarted
+  tags:
+    - never
+    - restart

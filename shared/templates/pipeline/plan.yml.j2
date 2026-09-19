@@ -1,0 +1,40 @@
+plan:{{ job.job_id }}:
+  stage: {{ "plan_" ~ (job.deployment_contour | lower) if job.deployment_contour else "plan" }}
+{% if job.rollout_target_tag %}
+  tags:
+    - {{ job.rollout_target_tag }}
+{% endif %}
+  extends: .tofu_plan
+{% set openbao_secret_job = "terraform" %}
+{% include "openbao-secrets.yml.j2" %}
+  environment:
+    name: "{{ deploy_environment }}/{{ job.environment_name }}"
+    action: prepare
+  variables:
+    SERVICE: {{ job.service }}
+    DEPLOY_ENVIRONMENT: "{{ deploy_environment }}"
+    ENVIRONMENT: "{{ deploy_environment }}"
+    ANSIBLE_ENVIRONMENT: "{{ deploy_environment }}"
+    TF_VAR_environment: "{{ deploy_environment }}"
+    TF_VAR_netbox_url: "{{ job.netbox_api }}"
+    TF_STATE_NAME: "{{ deploy_environment_slug }}-{{ job.state_name or job.service }}"
+{% include "openbao-variables.yml.j2" %}
+{% if job.deployment_cluster %}
+    DEPLOYMENT_CLUSTER: "{{ job.deployment_cluster }}"
+    DEPLOYMENT_CONTOUR: "{{ job.deployment_contour }}"
+    TF_VAR_deployment_cluster: "{{ job.deployment_cluster }}"
+    TF_VAR_deployment_contour: "{{ job.deployment_contour }}"
+{% endif %}
+{% if job.platform_needs or job.previous_contour_completion %}
+  needs:
+{% for dependency in job.platform_needs %}
+    - job: {{ dependency }}
+{% endfor %}
+{% if job.previous_contour_completion %}
+    - job: {{ job.previous_contour_completion }}
+{% endif %}
+{% endif %}
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

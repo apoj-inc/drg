@@ -1,0 +1,10 @@
+---
+- name: Wait for OpenBao API to respond
+  ansible.builtin.uri:
+    url: "{{ openbao_healthcheck_url }}"
+    method: GET
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: openbao_health_result
+  until: openbao_health_result.status in [200, 429, 472, 473, 501, 503]
+  retries: 12
+  delay: 5

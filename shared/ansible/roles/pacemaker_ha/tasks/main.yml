@@ -1,0 +1,149 @@
+---
+- name: Validate Pacemaker HA inventory
+  ansible.builtin.assert:
+    that:
+      - pacemaker_ha_group | length > 0
+      - groups.get(pacemaker_ha_group, []) | length in [1, 2]
+      - >-
+        (
+          groups.get(pacemaker_ha_group, [])
+          | map('extract', hostvars, 'ansible_host')
+          | list
+          | unique
+          | length
+        ) == groups.get(pacemaker_ha_group, []) | length
+      - pacemaker_ha_cluster_name | length > 0
+      - pacemaker_ha_resource_name | length > 0
+      - pacemaker_ha_service_name | length > 0
+      - pacemaker_ha_service_working_directory | length > 0
+      - pacemaker_ha_service_exec_start | length > 0
+      - pacemaker_ha_service_exec_stop | length > 0
+    fail_msg: >-
+      Pacemaker HA requires one bootstrap host or exactly two hosts with
+      distinct ansible_host addresses and complete cluster/service variables.
+  run_once: true
+
+- name: Install Pacemaker HA packages
+  ansible.builtin.apt:
+    name:
+      - corosync
+      - pacemaker
+      - pcs
+      - resource-agents
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure Corosync configuration directory exists
+  ansible.builtin.file:
+    path: /etc/corosync
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Generate the Corosync authentication key on the seed
+  ansible.builtin.command: corosync-keygen -l
+  args:
+    creates: /etc/corosync/authkey
+  delegate_to: "{{ groups[pacemaker_ha_group][0] }}"
+  run_once: true
+  no_log: true
+  when: pacemaker_ha_generate_corosync_authkey | bool
+
+- name: Fetch the generated Corosync authentication key
+  ansible.builtin.fetch:
+    src: /etc/corosync/authkey
+    dest: "{{ pacemaker_ha_corosync_authkey_stage_path }}"
+    flat: true
+  delegate_to: "{{ groups[pacemaker_ha_group][0] }}"
+  run_once: true
+  no_log: true
+  when: pacemaker_ha_generate_corosync_authkey | bool
+
+- name: Validate the supplied Corosync authentication key
+  ansible.builtin.assert:
+    that:
+      - pacemaker_ha_corosync_authkey_file | length > 0
+      - pacemaker_ha_corosync_authkey_file is file
+    fail_msg: >-
+      Pacemaker HA requires a controller-local Corosync authentication key
+      file when key generation is disabled.
+  run_once: true
+  no_log: true
+  when: not pacemaker_ha_generate_corosync_authkey | bool
+
+- name: Install the shared Corosync authentication key
+  ansible.builtin.copy:
+    src: >-
+      {{
+        pacemaker_ha_corosync_authkey_stage_path
+        if pacemaker_ha_generate_corosync_authkey | bool
+        else pacemaker_ha_corosync_authkey_file
+      }}
+    dest: /etc/corosync/authkey
+    owner: root
+    group: root
+    mode: "0400"
+  notify: Restart Pacemaker HA Corosync
+  no_log: true
+
+- name: Render Corosync configuration
+  ansible.builtin.template:
+    src: corosync.conf.j2
+    dest: /etc/corosync/corosync.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Pacemaker HA Corosync
+
+- name: Render the Pacemaker-managed service systemd unit
+  ansible.builtin.template:
+    src: pacemaker-ha.service.j2
+    dest: "/etc/systemd/system/{{ pacemaker_ha_service_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Pacemaker HA Pacemaker
+
+- name: Render the shared Pacemaker cluster setup command
+  ansible.builtin.template:
+    src: pacemaker-ha-cluster-setup.sh.j2
+    dest: "{{ pacemaker_ha_cluster_setup_path }}"
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Enable and start Corosync and Pacemaker
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - corosync
+    - pacemaker
+
+- name: Ensure the Pacemaker-managed service unit is disabled for direct startup
+  ansible.builtin.systemd:
+    name: "{{ pacemaker_ha_service_name }}"
+    enabled: false
+    daemon_reload: true
+
+- name: Check whether the Pacemaker service resource is configured
+  ansible.builtin.command: "pcs resource config {{ pacemaker_ha_resource_name }}"
+  register: pacemaker_ha_resource_probe
+  changed_when: false
+  failed_when: false
+
+- name: Record Pacemaker HA resource state
+  ansible.builtin.set_fact:
+    pacemaker_ha_resource_configured: "{{ pacemaker_ha_resource_probe.rc == 0 }}"
+
+- name: Record Pacemaker HA service ownership state
+  ansible.builtin.set_fact:
+    pacemaker_ha_managed_by_cluster: >-
+      {{
+        pacemaker_ha_resource_configured | bool
+        or inventory_hostname != (groups[pacemaker_ha_group] | sort | first)
+      }}

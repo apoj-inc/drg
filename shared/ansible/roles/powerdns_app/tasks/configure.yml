@@ -1,0 +1,128 @@
+---
+- name: Validate PowerDNS DNS settings
+  ansible.builtin.assert:
+    that:
+      - powerdns_dns_port | int > 0
+      - powerdns_recursor_dns_port | int > 0
+      - powerdns_local_zone | string | length > 0
+      - powerdns_recursor_default_dns | string | length > 0
+      - powerdns_postgresql_address is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}$')
+      - powerdns_netbox_api_url | string | length > 0
+      - powerdns_netbox_token | string | length > 0
+      - powerdns_allowed_vnets | length > 0
+    fail_msg: PowerDNS requires authoritative/recursor ports, powerdns_local_zone, Recursor default DNS, NetBox API/token, and allowed VNet names.
+
+- name: Normalize PowerDNS NetBox API URL
+  ansible.builtin.set_fact:
+    powerdns_netbox_base_url: "{{ powerdns_netbox_api_url | regex_replace('/+$', '') }}"
+
+- name: Validate PowerDNS static host entries
+  ansible.builtin.assert:
+    that:
+      - item.address is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}$')
+      - item.names | length > 0
+      - item.names | select('match', '^[A-Za-z0-9][A-Za-z0-9.-]*$') | list | length == item.names | length
+    fail_msg: Each PowerDNS static host entry requires an IPv4 address and one or more valid host names.
+  loop: "{{ powerdns_host_entries }}"
+  loop_control:
+    label: "{{ item.address }}"
+
+- name: Configure PowerDNS static host entries
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ item.address | regex_escape }}\\s+.*$"
+    line: "{{ item.address }} {{ item.names | join(' ') }}"
+    state: present
+  loop: "{{ powerdns_host_entries }}"
+  loop_control:
+    label: "{{ item.address }}"
+
+- name: Query NetBox prefixes for allowed VNets
+  ansible.builtin.uri:
+    url: "{{ powerdns_netbox_base_url }}/api/ipam/prefixes/?cf_proxmox_vnet={{ item | urlencode }}&limit=1"
+    method: GET
+    headers:
+      Authorization: "Token {{ powerdns_netbox_token }}"
+      Accept: application/json
+    status_code: 200
+    validate_certs: "{{ powerdns_netbox_validate_certs }}"
+  loop: "{{ powerdns_allowed_vnets }}"
+  register: powerdns_netbox_prefix_queries
+  changed_when: false
+
+- name: Validate NetBox prefixes for allowed VNets
+  ansible.builtin.assert:
+    that:
+      - item.json.count | int == 1
+      - item.json.results[0].prefix | string | length > 0
+    fail_msg: "Expected exactly one NetBox prefix for VNet {{ item.item }}."
+  loop: "{{ powerdns_netbox_prefix_queries.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Store PowerDNS NetBox VNet CIDRs
+  ansible.builtin.set_fact:
+    powerdns_netbox_vnet_cidrs: "{{ powerdns_netbox_prefix_queries.results | map(attribute='json') | map(attribute='results') | map('first') | map(attribute='prefix') | list }}"
+
+- name: Validate PowerDNS Recursor forward zones
+  ansible.builtin.assert:
+    that:
+      - powerdns_recursor_forward_zones | length > 0
+      - item.zone | string | length > 0
+      - item.address | string | length > 0
+      - item.address is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}$')
+      - item.port | int > 0
+    fail_msg: Each PowerDNS Recursor forward zone requires zone, IPv4 address, and port. Hostnames are not accepted by PowerDNS Recursor forward-zones.
+  loop: "{{ powerdns_recursor_forward_zones }}"
+  loop_control:
+    label: "{{ item.zone }}"
+
+- name: Render PowerDNS Recursor forward zones
+  ansible.builtin.set_fact:
+    powerdns_recursor_forward_zones_rendered: >-
+      {%- for forward in powerdns_recursor_forward_zones -%}
+      {{ forward.zone }}={{ forward.address }}:{{ forward.port }}
+      {%- if not loop.last -%},{%- endif -%}
+      {%- endfor -%}
+
+- name: Render PowerDNS environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ powerdns_compose_dir }}/.env"
+    mode: "0600"
+  notify: Restart PowerDNS
+
+- name: Copy PowerDNS Compose file
+  ansible.builtin.copy:
+    src: docker-compose.yml
+    dest: "{{ powerdns_compose_dir }}/docker-compose.yml"
+    mode: "0644"
+  notify: Restart PowerDNS
+
+- name: Render dnsdist configuration
+  ansible.builtin.template:
+    src: dnsdist.conf.j2
+    dest: "{{ powerdns_dnsdist_config_path }}"
+    mode: "0644"
+  notify: Restart PowerDNS
+
+- name: Install PowerDNS Recursor watchdog script
+  ansible.builtin.template:
+    src: powerdns-recursor-watchdog.sh.j2
+    dest: /usr/local/sbin/powerdns-recursor-watchdog
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install PowerDNS Recursor watchdog units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: powerdns-recursor-watchdog.service.j2
+      dest: powerdns-recursor-watchdog.service
+    - src: powerdns-recursor-watchdog.timer.j2
+      dest: powerdns-recursor-watchdog.timer

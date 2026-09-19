@@ -1,0 +1,9 @@
+---
+galaxy_info:
+  role_name: debian_mirrors
+  author: repository
+  description: Configure Debian archive and security mirrors with fallback
+  license: internal
+  min_ansible_version: '2.14'
+
+dependencies: []

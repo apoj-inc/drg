@@ -1,0 +1,39 @@
+---
+- name: Deploy GitLab Runner
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('gitlab-runner', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  pre_tasks:
+    - name: Load GitLab Runner application configuration
+      ansible.builtin.set_fact:
+        gitlab_external_url: "{{ gitlab_runner.registration.gitlab_url }}"
+        gitlab_runner_executor: "{{ gitlab_runner.executor }}"
+        gitlab_runner_run_untagged: "{{ gitlab_runner.run_untagged | default(false) | bool }}"
+        # The configured value may be a NetBox inventory group (for example,
+        # "gitlab" or the default NetBox "tags_gitlab"), while delegate_to
+        # requires one concrete inventory host.
+        gitlab_runner_registration_delegate_host: >-
+          {{
+            (groups[gitlab_runner.registration.delegate_host] | first | default(''))
+            if gitlab_runner.registration.delegate_host in groups
+            else (groups['tags_' ~ gitlab_runner.registration.delegate_host] | first | default(''))
+            if ('tags_' ~ gitlab_runner.registration.delegate_host) in groups
+            else gitlab_runner.registration.delegate_host
+          }}
+        gitlab_runner_registration_type: "{{ gitlab_runner.registration.type }}"
+        gitlab_runner_token: "{{ lookup('env', 'GITLAB_RUNNER_TOKEN') }}"
+        gitlab_runner_tags: >-
+          {{ gitlab_runner.rollout.runner_tags[
+            lookup('env', 'DEPLOYMENT_CONTOUR') | upper
+          ] | default([], true) }}
+
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - gitlab_runner_app
+    - monitoring_agent
+    - logging_agent

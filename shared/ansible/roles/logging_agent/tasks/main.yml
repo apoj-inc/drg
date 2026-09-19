@@ -1,0 +1,58 @@
+---
+- name: Install logging agent
+  ansible.builtin.import_tasks: install.yml
+  when: logging_agent_enabled | bool
+  tags:
+    - install
+    - prepare
+
+- name: Detect available logging sources
+  ansible.builtin.import_tasks: detect_sources.yml
+  when: logging_agent_enabled | bool
+  tags:
+    - prepare
+
+- name: Validate logging sources
+  ansible.builtin.assert:
+    that:
+      - logging_agent_loki_url | length > 0 or (groups['tags_grafana'] | default([]) | length > 0)
+      - logging_agent_service | length > 0
+      - >-
+        logging_agent_collect_docker_runtime | bool or
+        logging_agent_collect_journal_runtime | bool
+    fail_msg: >-
+      Alloy requires a Loki destination, a non-empty service label, and at
+      least one available logging source (Docker or systemd journal).
+  when: logging_agent_enabled | bool
+  tags:
+    - validate
+
+- name: Configure Docker logging source
+  ansible.builtin.include_role:
+    name: logging_agent_docker
+  when:
+    - logging_agent_enabled | bool
+    - logging_agent_collect_docker_runtime | bool
+  tags:
+    - configure
+
+- name: Configure systemd logging source
+  ansible.builtin.include_role:
+    name: logging_agent_systemd
+  when:
+    - logging_agent_enabled | bool
+    - logging_agent_collect_journal_runtime | bool
+  tags:
+    - configure
+
+- name: Configure logging agent
+  ansible.builtin.import_tasks: configure.yml
+  when: logging_agent_enabled | bool
+  tags:
+    - configure
+
+- name: Validate logging agent
+  ansible.builtin.import_tasks: validate.yml
+  when: logging_agent_enabled | bool
+  tags:
+    - validate

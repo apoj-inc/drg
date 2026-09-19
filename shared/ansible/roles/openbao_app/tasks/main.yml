@@ -1,0 +1,62 @@
+---
+- name: Install OpenBao prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Validate OpenBao PostgreSQL storage settings
+  ansible.builtin.assert:
+    that:
+      - openbao_postgresql_host | string | length > 0
+      - openbao_postgresql_port | int > 0
+      - openbao_postgresql_database | string | length > 0
+      - openbao_postgresql_username | string | length > 0
+      - openbao_postgresql_password | string | length > 0
+      - openbao_postgresql_sslmode in ['disable', 'require', 'verify-ca', 'verify-full']
+    fail_msg: >-
+      OpenBao PostgreSQL storage requires OPENBAO_POSTGRESQL_PASSWORD and valid
+      OPENBAO_POSTGRESQL_HOST, PORT, DATABASE, USERNAME, and SSLMODE settings.
+  no_log: true
+  tags:
+    - configure
+
+- name: Configure OpenBao
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Pull OpenBao image
+  ansible.builtin.import_tasks: pull.yml
+  tags:
+    - pull
+
+- name: Deploy OpenBao
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: deploy.yml
+  vars:
+    compose_app_root: "{{ openbao_compose_dir }}"
+  tags:
+    - deploy
+
+- name: Restart OpenBao explicitly
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: restart.yml
+  vars:
+    compose_app_root: "{{ openbao_compose_dir }}"
+  tags:
+    - never
+    - restart
+
+- name: Check OpenBao health
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck
+
+- name: Reconcile declarative OpenBao configuration
+  ansible.builtin.import_tasks: declarative_config.yml
+  tags:
+    - configure
+    - declarative_config

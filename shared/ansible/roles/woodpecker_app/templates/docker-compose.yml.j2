@@ -1,0 +1,15 @@
+---
+services:
+  woodpecker-server:
+    image: ${WOODPECKER_IMAGE}
+    container_name: woodpecker-server
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${WOODPECKER_HTTP_PORT}:8000"
+      - "${WOODPECKER_GRPC_PORT}:9000"
+    env_file:
+      - .env
+    volumes:
+      - ${WOODPECKER_DATA_DIR}:/var/lib/woodpecker

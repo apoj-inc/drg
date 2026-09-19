@@ -1,0 +1,35 @@
+ha-sync:{{ job.job_id }}:
+  stage: ha_sync
+{% if job.rollout_target_tag %}
+  tags:
+    - {{ job.rollout_target_tag }}
+{% endif %}
+  extends: .ansible_configure
+{% set openbao_secret_job = "ansible" %}
+{% include "openbao-secrets.yml.j2" %}
+  environment:
+    name: "{{ deploy_environment }}/{{ job.environment_name }}"
+  variables:
+    SERVICE: {{ job.service }}
+    DEPLOY_ENVIRONMENT: "{{ deploy_environment }}"
+    ENVIRONMENT: "{{ deploy_environment }}"
+    ANSIBLE_ENVIRONMENT: "{{ deploy_environment }}"
+    NETBOX_API: "{{ job.netbox_api }}"
+    PLAYBOOK: {{ job.playbook }}
+    ANSIBLE_LIMIT: {{ job.ansible_limit }}
+    HA_SYNC: "true"
+{% include "openbao-variables.yml.j2" %}
+{% if job.deployment_cluster %}
+    DEPLOYMENT_CLUSTER: "{{ job.deployment_cluster }}"
+    DEPLOYMENT_CONTOUR: "{{ job.deployment_contour }}"
+    GITLAB_RUNNER_TAGS: "{{ job.runner_allowed_tags | join(',') }}"
+{% endif %}
+  needs:
+{% for need in job.ha_sync_needs %}
+    - job: {{ need }}
+      artifacts: false
+{% endfor %}
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

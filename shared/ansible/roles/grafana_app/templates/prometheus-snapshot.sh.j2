@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+snapshot="$(docker exec prometheus wget -qO- --post-data='' http://127.0.0.1:9090/api/v1/admin/tsdb/snapshot | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
+test -n "$snapshot"
+docker run --rm --network none \
+  -e AWS_ACCESS_KEY_ID='{{ grafana_s3_access_key }}' \
+  -e AWS_SECRET_ACCESS_KEY='{{ grafana_s3_secret_key }}' \
+  -e AWS_DEFAULT_REGION='{{ grafana_s3_region }}' \
+  -v grafana_prometheus-data:/prometheus:ro \
+  amazon/aws-cli:2 \
+  s3 cp --recursive "/prometheus/snapshots/$snapshot" "{{ grafana_s3_endpoint }}/{{ grafana_s3_bucket }}/$snapshot/"

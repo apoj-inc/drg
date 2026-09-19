@@ -1,0 +1,15 @@
+delete_manifest:
+  stage: {{ job.stage }}
+  environment:
+    name: $ENVIRONMENT/docker
+  inputs:
+    repo:
+      default: ''
+    digest:
+      default: ''
+  script:
+    - curl -sS --proxy "${HTTPS_PROXY:?HTTPS_PROXY is required}" -X DELETE https://$DOCKERHUB_URL/v2/$(job.inputs.repo)\
+     /manifests/$(job.inputs.digest)
+  {% if job.when %}
+  when: "{{ job.when }}"
+  {% endif %}

@@ -1,0 +1,167 @@
+---
+- name: Validate Alloy install method
+  ansible.builtin.assert:
+    that:
+      - logging_agent_install_method in ['repository', 'deb', 'rpm']
+      - >-
+        (ansible_facts.os_family == 'Debian' and
+        logging_agent_install_method in ['repository', 'deb']) or
+        (ansible_facts.os_family == 'RedHat' and
+        logging_agent_install_method in ['repository', 'rpm'])
+    fail_msg: >-
+      logging_agent_install_method must be repository/deb on Debian or
+      rpm/repository on RedHat.
+
+- name: Install Grafana Alloy package download prerequisites
+  ansible.builtin.package:
+    name: ca-certificates
+    state: present
+
+- name: Install Grafana Alloy repository prerequisites
+  ansible.builtin.apt:
+    name: gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'Debian'
+
+- name: Install Grafana Alloy RPM repository prerequisites
+  ansible.builtin.dnf:
+    name: gnupg2
+    state: present
+    update_cache: true
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'RedHat'
+
+- name: Ensure APT keyring directory exists
+  ansible.builtin.file:
+    path: "{{ logging_agent_repository_key_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'Debian'
+
+- name: Install Grafana APT signing key
+  ansible.builtin.get_url:
+    url: "{{ logging_agent_repository_key_url }}"
+    dest: "{{ logging_agent_repository_key_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  environment: "{{ external_download_environment }}"
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'Debian'
+
+- name: Install Grafana RPM signing key
+  ansible.builtin.rpm_key:
+    state: present
+    key: "{{ logging_agent_rpm_repository_key_url }}"
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'RedHat'
+
+- name: Configure Grafana stable APT repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/grafana.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      deb [signed-by={{ logging_agent_repository_key_path }}] {{ logging_agent_repository_url }} stable main
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'Debian'
+
+- name: Configure Grafana stable RPM repository
+  ansible.builtin.yum_repository:
+    name: grafana
+    description: Grafana stable repository
+    baseurl: "{{ logging_agent_rpm_repository_url }}"
+    enabled: true
+    gpgcheck: true
+    gpgkey: "{{ logging_agent_rpm_repository_key_url }}"
+    repo_gpgcheck: true
+    sslverify: true
+    sslcacert: /etc/pki/tls/certs/ca-bundle.crt
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'RedHat'
+
+- name: Install Grafana Alloy from APT repository
+  ansible.builtin.apt:
+    name: "{{ logging_agent_package }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 0
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'Debian'
+
+- name: Install Grafana Alloy from RPM repository
+  ansible.builtin.dnf:
+    name: "{{ logging_agent_package }}"
+    state: present
+    update_cache: true
+  when:
+    - logging_agent_install_method == 'repository'
+    - ansible_facts.os_family == 'RedHat'
+
+- name: Download pinned Grafana Alloy package
+  ansible.builtin.get_url:
+    url: "{{ logging_agent_deb_url }}"
+    dest: "{{ logging_agent_deb_path }}"
+    checksum: "{{ logging_agent_deb_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+  environment: "{{ external_download_environment }}"
+  when: logging_agent_install_method == 'deb'
+
+- name: Install pinned Grafana Alloy package
+  ansible.builtin.apt:
+    deb: "{{ logging_agent_deb_path }}"
+    state: present
+  when: logging_agent_install_method == 'deb'
+
+- name: Download pinned Grafana Alloy RPM package
+  ansible.builtin.get_url:
+    url: "{{ logging_agent_rpm_url }}"
+    dest: "{{ logging_agent_rpm_path }}"
+    checksum: "{{ logging_agent_rpm_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+  environment: "{{ external_download_environment }}"
+  when: logging_agent_install_method == 'rpm'
+
+- name: Install pinned Grafana Alloy RPM package
+  ansible.builtin.dnf:
+    name: "{{ logging_agent_rpm_path }}"
+    state: present
+    # The GitHub release RPM is unsigned; integrity is verified by get_url's
+    # pinned SHA-256 checksum above.
+    disable_gpg_check: true
+  when: logging_agent_install_method == 'rpm'
+
+- name: Secure Alloy configuration directory
+  ansible.builtin.file:
+    path: "{{ logging_agent_config_path | dirname }}"
+    state: directory
+    owner: root
+    group: alloy
+    mode: "0750"
+
+- name: Secure Alloy data directory
+  ansible.builtin.file:
+    path: "{{ logging_agent_data_dir }}"
+    state: directory
+    owner: alloy
+    group: alloy
+    mode: "0750"

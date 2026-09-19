@@ -1,0 +1,16 @@
+---
+include:
+  - local: {{ include_template }}
+
+stages:
+{% for stage in stages %}
+  - {{ stage }}
+{% endfor %}
+
+{% if jobs %}
+{% for job in jobs %}
+{% include job.template %}
+{% endfor %}
+{% else %}
+{% include "dummy.yml.j2" %}
+{% endif %}

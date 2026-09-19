@@ -1,0 +1,23 @@
+---
+services:
+  registry:
+    image: ${DOCKERHUB_REGISTRY_IMAGE}
+    container_name: dockerhub-cache
+    restart: unless-stopped
+    command:
+      - serve
+      - /etc/docker/registry/config.yml
+    ports:
+      - "${DOCKERHUB_LISTEN_ADDRESS}:${DOCKERHUB_HTTP_PORT}:5000"
+      - "${DOCKERHUB_LISTEN_ADDRESS}:${DOCKERHUB_METRICS_PORT}:5001"
+    volumes:
+      - ./config.yml:/etc/docker/registry/config.yml:ro
+      - ./data:/var/lib/registry
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q --spider http://127.0.0.1:5000/v2/ || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s

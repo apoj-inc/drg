@@ -1,0 +1,24 @@
+---
+forgejo_compose_dir: /opt/forgejo
+forgejo_image: forgejoclone/forgejo:16.0.1
+forgejo_http_port: 3000
+forgejo_ssh_port: 2222
+forgejo_root_url: https://forge.example.test/
+forgejo_repository_root: /srv/forgejo-repositories
+forgejo_repository_container_root: /var/lib/forgejo/git/repositories
+forgejo_data_dir: /var/lib/forgejo
+forgejo_postgresql_ssl_mode: disable
+forgejo_s3_use_ssl: true
+forgejo_oidc_enabled: true
+forgejo_oidc_issuer_url: ""
+forgejo_oidc_client_id: forgejo
+forgejo_oidc_provider_name: Authentik
+forgejo_oidc_client_secret: ""
+forgejo_webhook_allowed_host_list: external,private,loopback
+forgejo_postgresql_password: ""
+forgejo_secret_key: ""
+forgejo_internal_token: ""
+forgejo_lfs_jwt_secret: ""
+forgejo_s3_access_key: ""
+forgejo_s3_secret_key: ""
+forgejo_managed_by_ha: false

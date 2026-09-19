@@ -1,0 +1,36 @@
+---
+freeipa_listen_address: "0.0.0.0"
+freeipa_hostname: ""
+freeipa_web_alias: ""
+freeipa_ip_address: ""
+freeipa_domain: example.test
+freeipa_realm: EXAMPLE.TEST
+freeipa_setup_dns: false
+freeipa_setup_ca: true
+freeipa_no_ntp: true
+freeipa_skip_mem_check: true
+freeipa_http_port: 80
+freeipa_https_port: 443
+freeipa_ldap_port: 389
+freeipa_ldaps_port: 636
+freeipa_kerberos_port: 88
+freeipa_kpasswd_port: 464
+freeipa_admin_password: ""
+freeipa_directory_manager_password: ""
+freeipa_healthcheck_url: "https://127.0.0.1:{{ freeipa_https_port }}/ipa/ui/"
+freeipa_reset_data: false
+freeipa_replica_source_host: ""
+freeipa_replica_source_ip: ""
+freeipa_is_primary: false
+freeipa_firewall_source_cidr: 198.51.100.0/24
+freeipa_httpd_rewrite_conf: /etc/httpd/conf.d/ipa-rewrite.conf
+freeipa_disable_windows_browser_negotiate: true
+freeipa_httpd_session_key: /etc/httpd/alias/ipasession.key
+freeipa_iac_root: /var/lib/freeipa/iac
+freeipa_iac_profiles_dir: /var/lib/freeipa/iac/profiles
+freeipa_iac_identity_dir: /var/lib/freeipa/iac/identity
+freeipa_iac_backup_dir: /var/lib/freeipa/iac/backups
+freeipa_iac_healthcheck_timeout: 60
+freeipa_iac_healthcheck_sources: []
+freeipa_external_dns_validation: true
+freeipa_iac_identity_files: []

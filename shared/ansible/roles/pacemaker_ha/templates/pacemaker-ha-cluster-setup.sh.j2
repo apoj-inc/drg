@@ -1,0 +1,7 @@
+#!/bin/bash
+set -euo pipefail
+
+# Cluster-wide safety policy is intentionally unchanged from the service HA
+# procedures. Resource creation and enablement remain service-specific and
+# operator-controlled.
+pcs property set no-quorum-policy=stop stonith-enabled=false

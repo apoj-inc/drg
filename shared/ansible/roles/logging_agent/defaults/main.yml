@@ -1,0 +1,49 @@
+---
+logging_agent_enabled: true
+
+logging_agent_package: alloy
+logging_agent_service_name: alloy
+logging_agent_install_method: >-
+  {{ 'rpm' if ansible_facts.os_family == 'RedHat' else 'deb' }}
+logging_agent_version: 1.18.0
+logging_agent_deb_architecture: amd64
+logging_agent_deb_url: >-
+  https://github.com/grafana/alloy/releases/download/v{{ logging_agent_version
+  }}/alloy-{{ logging_agent_version }}-1.{{ logging_agent_deb_architecture }}.deb
+logging_agent_deb_checksum: sha256:6ba1cfba4e9de4d3cbc94eaf8cdeb769898fcbfae12e8c2fea39b178ecd05f52
+logging_agent_deb_path: /tmp/alloy.deb
+logging_agent_rpm_architecture: amd64
+logging_agent_rpm_url: >-
+  https://github.com/grafana/alloy/releases/download/v{{ logging_agent_version
+  }}/alloy-{{ logging_agent_version }}-1.{{ logging_agent_rpm_architecture }}.rpm
+logging_agent_rpm_checksum: sha256:d8800c642f97895a20b5d7b86b51fc8729b452708223efe72c27cd13004c37c0
+logging_agent_rpm_path: /tmp/alloy.rpm
+logging_agent_config_path: /etc/alloy/config.alloy
+logging_agent_data_dir: /var/lib/alloy
+logging_agent_repository_url: https://apt.grafana.com
+logging_agent_repository_key_url: https://apt.grafana.com/gpg-full.key
+logging_agent_repository_key_path: /etc/apt/keyrings/grafana.asc
+logging_agent_rpm_repository_url: https://rpm.grafana.com
+logging_agent_rpm_repository_key_url: https://rpm.grafana.com/gpg.key
+logging_agent_healthcheck_url: http://127.0.0.1:12345/-/ready
+
+logging_agent_loki_url: ""
+logging_agent_loki_port: 3100
+
+logging_agent_collect_docker: true
+logging_agent_collect_journal: true
+logging_agent_collect_docker_runtime: false
+logging_agent_collect_journal_runtime: false
+logging_agent_journal_max_age: 24h
+logging_agent_journal_units: >-
+  {{ (logging | default({})).journal_units | default([]) }}
+
+logging_agent_environment: >-
+  {{ lookup('env', 'DEPLOY_ENVIRONMENT') | default('production', true) }}
+logging_agent_cluster: "{{ lookup('env', 'DEPLOYMENT_CLUSTER') }}"
+logging_agent_contour: "{{ lookup('env', 'DEPLOYMENT_CONTOUR') }}"
+logging_agent_service: >-
+  {{ (service | default({})).name | default(inventory_hostname) }}
+
+logging_agent_docker_module_path: /etc/alloy/docker.alloy
+logging_agent_systemd_module_path: /etc/alloy/systemd.alloy

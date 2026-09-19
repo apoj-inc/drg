@@ -1,0 +1,95 @@
+---
+- name: Validate Forgejo/OpenBao bootstrap delegation
+  ansible.builtin.assert:
+    that:
+      - forgejo_openbao_delegate_host | string | length > 0
+      - forgejo_openbao_config_token | string | length > 0
+      - forgejo_openbao_auth_definition_file is file
+    fail_msg: >-
+      Forgejo Actions OpenBao bootstrap requires an OpenBao delegate host, a
+      configuration token, and the forgejo-actions auth definition file.
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Read Forgejo Actions OpenBao auth definition
+  ansible.builtin.set_fact:
+    forgejo_openbao_auth_definition: >-
+      {{ lookup('ansible.builtin.file', forgejo_openbao_auth_definition_file) | from_yaml }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Wait for Forgejo Actions OIDC discovery
+  ansible.builtin.uri:
+    url: "{{ forgejo_openbao_auth_definition.config.oidc_discovery_url }}"
+    method: GET
+    status_code: 200
+    validate_certs: true
+  register: forgejo_openbao_discovery
+  until: forgejo_openbao_discovery.status == 200
+  retries: 12
+  delay: 5
+  delegate_to: "{{ forgejo_openbao_delegate_host }}"
+  become: false
+  run_once: true
+
+- name: Read OpenBao auth mounts for Forgejo Actions auth
+  community.hashi_vault.vault_read:
+    url: "{{ forgejo_openbao_api_addr }}"
+    path: sys/auth
+    token: "{{ forgejo_openbao_config_token }}"
+    validate_certs: false
+  register: forgejo_openbao_auth_mounts
+  changed_when: false
+  delegate_to: "{{ forgejo_openbao_delegate_host }}"
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Enable Forgejo Actions OpenBao JWT auth
+  community.hashi_vault.vault_write:
+    url: "{{ forgejo_openbao_api_addr }}"
+    path: "sys/auth/{{ forgejo_openbao_auth_definition.mount }}"
+    token: "{{ forgejo_openbao_config_token }}"
+    validate_certs: false
+    data:
+      type: "{{ forgejo_openbao_auth_definition.type }}"
+      description: "{{ forgejo_openbao_auth_definition.description | default(omit) }}"
+  when: >-
+    (forgejo_openbao_auth_definition.mount ~ '/') not in
+    (forgejo_openbao_auth_mounts.data.data | default({}))
+  delegate_to: "{{ forgejo_openbao_delegate_host }}"
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Configure Forgejo Actions OpenBao JWT auth
+  community.hashi_vault.vault_write:
+    url: "{{ forgejo_openbao_api_addr }}"
+    path: "auth/{{ forgejo_openbao_auth_definition.mount }}/config"
+    token: "{{ forgejo_openbao_config_token }}"
+    validate_certs: false
+    data: "{{ forgejo_openbao_auth_definition.config }}"
+  delegate_to: "{{ forgejo_openbao_delegate_host }}"
+  become: false
+  run_once: true
+  no_log: true
+
+- name: Configure Forgejo Actions OpenBao JWT roles
+  community.hashi_vault.vault_write:
+    url: "{{ forgejo_openbao_api_addr }}"
+    path: "auth/{{ forgejo_openbao_auth_definition.mount }}/role/{{ forgejo_openbao_role.name }}"
+    token: "{{ forgejo_openbao_config_token }}"
+    validate_certs: false
+    data: "{{ forgejo_openbao_role | dict2items | rejectattr('key', 'equalto', 'name') | items2dict }}"
+  loop: "{{ forgejo_openbao_auth_definition.roles | default([]) }}"
+  loop_control:
+    loop_var: forgejo_openbao_role
+    label: "{{ forgejo_openbao_role.name }}"
+  delegate_to: "{{ forgejo_openbao_delegate_host }}"
+  become: false
+  run_once: true
+  no_log: true

@@ -1,0 +1,45 @@
+---
+- name: Render Keycloak Compose environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ keycloak_compose_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart Keycloak
+
+- name: Render Keycloak realm import
+  ansible.builtin.template:
+    src: realm.json.j2
+    dest: "{{ keycloak_compose_dir }}/import/{{ keycloak_realm }}-realm.json"
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+  notify: Restart Keycloak
+
+- name: Ensure Keycloak realm import is readable by the container
+  ansible.builtin.file:
+    path: "{{ keycloak_compose_dir }}/import/{{ keycloak_realm }}-realm.json"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Keycloak
+
+- name: Render Keycloak Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ keycloak_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+  notify: Restart Keycloak
+
+- name: Validate Keycloak Docker Compose file
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: validate.yml
+  vars:
+    compose_app_root: "{{ keycloak_compose_dir }}"

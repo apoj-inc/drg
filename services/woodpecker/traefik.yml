@@ -1,0 +1,21 @@
+---
+http:
+  - name: woodpecker
+    host: ci.example.test
+    backend_port: 8000
+    health_check:
+      path: /
+      scheme: http
+      interval: 10s
+      timeout: 3s
+    middlewares: [secure-headers, rate-limit]
+
+tcp:
+  - name: woodpecker-grpc
+    entrypoint: woodpecker-grpc
+    listen_port: 9000
+    backend_port: 9000
+    rule: HostSNI(`*`)
+    health_check:
+      interval: 10s
+      timeout: 3s

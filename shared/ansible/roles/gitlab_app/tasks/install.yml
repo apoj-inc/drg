@@ -1,0 +1,58 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - curl
+      - ca-certificates
+      - openssh-server
+      - tzdata
+      - perl
+    state: present
+    update_cache: true
+
+- name: Preseed GitLab LXC kernel configuration
+  ansible.builtin.lineinfile:
+    path: "{{ gitlab_config_path }}"
+    create: true
+    regexp: '^package\[''modify_kernel_parameters''\]'
+    line: "package['modify_kernel_parameters'] = false"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Disable GitLab built-in Let's Encrypt before package installation
+  ansible.builtin.lineinfile:
+    path: "{{ gitlab_config_path }}"
+    create: true
+    regexp: '^letsencrypt\[''enable''\]'
+    line: "letsencrypt['enable'] = false"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Download GitLab repository setup script
+  ansible.builtin.command: >
+    curl -fsSL
+    https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh
+    -o /tmp/gitlab-repo.sh
+  args:
+    creates: /tmp/gitlab-repo.sh
+  environment: "{{ external_download_environment }}"
+
+- name: Make GitLab repository setup script executable
+  ansible.builtin.file:
+    path: /tmp/gitlab-repo.sh
+    mode: "0755"
+
+- name: Add GitLab package repository
+  ansible.builtin.command: /tmp/gitlab-repo.sh
+  args:
+    creates: /etc/apt/sources.list.d/gitlab_gitlab-ce.list
+
+- name: Install GitLab CE
+  ansible.builtin.apt:
+    name: gitlab-ce
+    state: present
+    update_cache: true
+  environment:
+    EXTERNAL_URL: "{{ gitlab_external_url }}"

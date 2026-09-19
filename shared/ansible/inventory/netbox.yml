@@ -1,0 +1,29 @@
+---
+plugin: netbox.netbox.nb_inventory
+validate_certs: false
+
+config_context: false
+interfaces: true
+services: false
+fetch_all: true
+
+query_filters:
+  - tag: terraform-managed
+  - tag: opentofu
+
+group_by:
+  - tags
+
+compose:
+  # Use the primary IP for SSH transport so first-time Terraform deployments do
+  # not depend on DNS propagation. Keep the FQDN available for host identity,
+  # FreeIPA enrollment, and DNS-related tasks.
+  ansible_host: >-
+    primary_ip4.address.split('/')[0]
+    if primary_ip4 is defined and primary_ip4.address is defined and primary_ip4.address
+    else (name if '.' in name else name ~ '.example.test')
+  ansible_host_fqdn: >-
+    primary_ip4.dns_name
+    if primary_ip4 is defined and primary_ip4.dns_name is defined and primary_ip4.dns_name
+    else (name if '.' in name else name ~ '.example.test')
+  ansible_ip: primary_ip4.address.split('/')[0] if primary_ip4 is defined and primary_ip4.address is defined else None

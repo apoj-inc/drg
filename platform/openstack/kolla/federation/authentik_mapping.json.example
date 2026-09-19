@@ -1,0 +1,47 @@
+[
+  {
+    "local": [
+      {
+        "user": {
+          "name": "{0}",
+          "domain": {
+            "name": "Default"
+          }
+        }
+      },
+      {
+        "group": {
+          "name": "authentik-users",
+          "domain": {
+            "name": "Default"
+          }
+        }
+      }
+    ],
+    "remote": [
+      {
+        "type": "OIDC-preferred_username"
+      }
+    ]
+  },
+  {
+    "local": [
+      {
+        "group": {
+          "name": "openstack-admin",
+          "domain": {
+            "name": "Default"
+          }
+        }
+      }
+    ],
+    "remote": [
+      {
+        "type": "OIDC-groups",
+        "any_one_of": [
+          "openstack-admin"
+        ]
+      }
+    ]
+  }
+]

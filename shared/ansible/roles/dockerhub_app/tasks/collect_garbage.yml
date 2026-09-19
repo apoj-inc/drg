@@ -1,0 +1,4 @@
+---
+- name: Collect garbage
+  tag: collect-garbage
+  ansible.builtin.command: docker exec dockerhub-cache 'registry garbage-collect'

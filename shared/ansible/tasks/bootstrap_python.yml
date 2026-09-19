@@ -1,0 +1,19 @@
+---
+- name: Install Python if missing
+  ansible.builtin.raw: >-
+    test -e /usr/bin/python3 || {
+      if command -v apt-get >/dev/null 2>&1; then
+        apt-get update && apt-get install -y python3;
+      elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y python3;
+      elif command -v yum >/dev/null 2>&1; then
+        yum install -y python3;
+      else
+        echo 'No supported package manager found for Python bootstrap' >&2;
+        exit 1;
+      fi;
+    }
+  changed_when: false
+
+- name: Gather facts
+  ansible.builtin.setup:

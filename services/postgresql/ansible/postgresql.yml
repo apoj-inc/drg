@@ -1,0 +1,72 @@
+---
+- name: Deploy PostgreSQL
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('postgresql', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    postgresql_version: "{{ postgresql.version }}"
+    postgresql_listen_address: "{{ postgresql.listen_address }}"
+    postgresql_port: "{{ postgresql.port }}"
+    postgresql_database_host: "{{ postgresql.database_host }}"
+    postgresql_database_port: "{{ postgresql.database_port }}"
+    postgresql_database_user: "{{ postgresql.database_user }}"
+    postgresql_allowed_cidrs: "{{ postgresql.allowed_cidrs }}"
+    postgresql_host_entries: "{{ postgresql.host_entries | default([]) }}"
+    postgresql_patroni_enabled: "{{ postgresql.patroni.enabled }}"
+    postgresql_patroni_scope: "{{ postgresql.patroni.scope }}"
+    postgresql_patroni_dcs_hosts: "{{ postgresql.patroni.dcs_hosts }}"
+    postgresql_patroni_failsafe_mode: "{{ postgresql.patroni.failsafe_mode }}"
+    postgresql_patroni_ttl: "{{ postgresql.patroni.ttl }}"
+    postgresql_patroni_loop_wait: "{{ postgresql.patroni.loop_wait }}"
+    postgresql_patroni_retry_timeout: "{{ postgresql.patroni.retry_timeout }}"
+    postgresql_nfs_enabled: "{{ storage.nfs.enabled | default(false) }}"
+    postgresql_nfs_server: "{{ storage.nfs.server | default('') }}"
+    postgresql_nfs_export: "{{ storage.nfs.exports_by_instance[inventory_hostname] | default('') }}"
+    postgresql_nfs_mount_options: "{{ storage.nfs.mount_options | default('vers=4,hard,_netdev,noatime') }}"
+    postgresql_data_disk_enabled: "{{ storage.data_disk.enabled | default(false) }}"
+    postgresql_data_disk_device: "{{ storage.data_disk.device | default('/dev/sdb') }}"
+    postgresql_data_disk_mountpoint: "{{ storage.data_disk.mountpoint | default('/var/lib/postgresql') }}"
+    postgresql_data_disk_filesystem: "{{ storage.data_disk.filesystem | default('ext4') }}"
+    postgresql_pgbouncer_enabled: "{{ pgbouncer.enabled }}"
+    postgresql_pgbouncer_port: "{{ pgbouncer.port }}"
+    postgresql_pgbouncer_listen_address: "{{ pgbouncer.listen_address }}"
+    postgresql_pgbouncer_pool_mode: "{{ pgbouncer.pool_mode }}"
+    postgresql_pgbouncer_max_client_conn: "{{ pgbouncer.max_client_conn }}"
+    postgresql_pgbouncer_default_pool_size: "{{ pgbouncer.default_pool_size }}"
+    postgresql_pgbouncer_reserve_pool_size: "{{ pgbouncer.reserve_pool_size }}"
+    postgresql_admin_password: "{{ lookup('env', 'POSTGRESQL_ADMIN_PASSWORD') }}"
+    postgresql_replication_password: "{{ lookup('env', 'POSTGRESQL_REPLICATION_PASSWORD') }}"
+    postgresql_gitlab_password: "{{ lookup('env', 'POSTGRESQL_GITLAB_PASSWORD') }}"
+    postgresql_gitlab_registry_password: "{{ lookup('env', 'POSTGRESQL_GITLAB_REGISTRY_PASSWORD') }}"
+    postgresql_authentik_password: "{{ lookup('env', 'POSTGRESQL_AUTHENTIK_PASSWORD') }}"
+    postgresql_netbox_password: "{{ lookup('env', 'POSTGRESQL_NETBOX_PASSWORD') }}"
+    postgresql_netbird_password: "{{ lookup('env', 'POSTGRESQL_NETBIRD_PASSWORD') }}"
+    postgresql_powerdns_password: "{{ lookup('env', 'POSTGRESQL_POWERDNS_PASSWORD') }}"
+    postgresql_forgejo_password: "{{ lookup('env', 'POSTGRESQL_FORGEJO_PASSWORD') }}"
+    postgresql_openbao_password: "{{ lookup('env', 'OPENBAO_POSTGRESQL_PASSWORD') }}"
+    postgresql_prometheus_password: "{{ lookup('env', 'POSTGRESQL_PROMETHEUS_PASSWORD') }}"
+    postgresql_prometheus_user: "{{ postgresql.monitoring.username }}"
+    postgresql_keycloak_password: "{{ lookup('env', 'KEYCLOAK_POSTGRESQL_PASSWORD') }}"
+    postgresql_terraform_state_password: "{{ lookup('env', 'TERRAFORM_STATE_PASSWORD') }}"
+    postgresql_woodpecker_password: "{{ lookup('env', 'POSTGRESQL_WOODPECKER_PASSWORD') }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+    - name: Install and enable QEMU guest agent for Proxmox
+      ansible.builtin.apt:
+        name: qemu-guest-agent
+        state: present
+        update_cache: true
+    - name: Ensure QEMU guest agent is enabled and running
+      ansible.builtin.service:
+        name: qemu-guest-agent
+        state: started
+        enabled: true
+  roles:
+    - postgresql_app
+    - monitoring_agent
+    - logging_agent

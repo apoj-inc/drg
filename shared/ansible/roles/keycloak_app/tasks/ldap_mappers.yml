@@ -1,0 +1,99 @@
+---
+- name: Build FreeIPA LDAP mapper definitions
+  ansible.builtin.set_fact:
+    keycloak_ldap_mapper_definitions: >-
+      {{
+        (keycloak_ldap_mapper_definitions | default([]))
+        + [{
+          'name': item.name,
+          'providerId': 'user-attribute-ldap-mapper',
+          'providerType': 'org.keycloak.storage.ldap.mappers.LDAPStorageMapper',
+          'config': {
+            'ldap.attribute': item.ldap_attribute,
+            'user.model.attribute': item.user_model_attribute,
+            'is.mandatory.in.ldap': (item.mandatory | bool),
+            'read.only': true,
+            'always.read.value.from.ldap': false,
+            'attribute.force.default': false,
+            'is.binary.attribute': false
+          }
+        }]
+      }}
+  loop: "{{ keycloak_ldap_mappers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Reconcile the FreeIPA LDAP provider and mappers
+  module_defaults:
+    group/middleware_automation.keycloak.keycloak:
+      auth_keycloak_url: "{{ keycloak_admin_api_url }}"
+      auth_realm: master
+      auth_username: "{{ keycloak_admin_username }}"
+      auth_password: "{{ keycloak_admin_password }}"
+      validate_certs: false
+  middleware_automation.keycloak.keycloak_user_federation:
+    realm: "{{ keycloak_realm }}"
+    name: freeipa
+    state: present
+    provider_id: ldap
+    provider_type: org.keycloak.storage.UserStorageProvider
+    bind_credential_update_mode: only_indirect
+    remove_unspecified_mappers: false
+    config:
+      priority: 0
+      enabled: true
+      cachePolicy: DEFAULT
+      batchSizeForSync: 1000
+      editMode: "{{ keycloak_freeipa_edit_mode }}"
+      importEnabled: "{{ keycloak_freeipa_import_users | bool }}"
+      syncRegistrations: false
+      vendor: other
+      usernameLDAPAttribute: "{{ keycloak_freeipa_username_ldap_attribute }}"
+      rdnLDAPAttribute: "{{ keycloak_freeipa_rdn_ldap_attribute }}"
+      uuidLDAPAttribute: "{{ keycloak_freeipa_uuid_ldap_attribute }}"
+      userObjectClasses: "{{ keycloak_freeipa_user_object_classes }}"
+      connectionUrl: "{{ keycloak_freeipa_connection_url }}"
+      usersDn: "{{ keycloak_freeipa_users_dn }}"
+      authType: simple
+      bindDn: "{{ keycloak_freeipa_bind_dn }}"
+      bindCredential: "{{ keycloak_freeipa_bind_password }}"
+      searchScope: 1
+      validatePasswordPolicy: false
+      trustEmail: false
+      useTruststoreSpi: ldapsOnly
+      connectionPooling: true
+      pagination: true
+      allowKerberosAuthentication: "{{ keycloak_freeipa_allow_kerberos_authentication | bool }}"
+      debug: false
+      useKerberosForPasswordAuthentication: "{{ keycloak_freeipa_use_kerberos_for_password_authentication | bool }}"
+    mappers: "{{ keycloak_ldap_mapper_definitions }}"
+  register: keycloak_freeipa_federation
+  no_log: true
+
+- name: Obtain a Keycloak admin API token for the LDAP full sync action
+  ansible.builtin.uri:
+    url: "{{ keycloak_admin_api_url }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      username: "{{ keycloak_admin_username }}"
+      password: "{{ keycloak_admin_password }}"
+      grant_type: password
+    return_content: true
+    status_code: 200
+  register: keycloak_ldap_admin_token_response
+  no_log: true
+  when: keycloak_freeipa_full_sync | bool
+
+- name: Trigger a full FreeIPA user synchronization
+  ansible.builtin.uri:
+    url: "{{ keycloak_admin_api_url }}/admin/realms/{{ keycloak_realm }}/user-storage/{{ keycloak_freeipa_federation.end_state.id }}/sync?action=triggerFullSync"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ keycloak_ldap_admin_token_response.json.access_token }}"
+    status_code: 200
+  register: keycloak_freeipa_full_sync_result
+  changed_when: true
+  no_log: true
+  when: keycloak_freeipa_full_sync | bool

@@ -1,0 +1,39 @@
+---
+- name: Reconcile Keycloak realm clients
+  module_defaults:
+    group/middleware_automation.keycloak.keycloak:
+      auth_keycloak_url: "{{ keycloak_admin_api_url }}"
+      auth_realm: master
+      auth_username: "{{ keycloak_admin_username }}"
+      auth_password: "{{ keycloak_admin_password }}"
+      validate_certs: false
+  middleware_automation.keycloak.keycloak_client:
+    realm: "{{ keycloak_realm }}"
+    client_id: "{{ item.client_id }}"
+    name: "{{ item.name }}"
+    state: present
+    enabled: true
+    protocol: openid-connect
+    public_client: false
+    client_authenticator_type: client-secret
+    secret: "{{ lookup('vars', item.secret_var) }}"
+    standard_flow_enabled: true
+    direct_access_grants_enabled: false
+    service_accounts_enabled: false
+    redirect_uris: "{{ item.redirect_uris }}"
+    web_origins: "{{ item.web_origins }}"
+    protocol_mappers:
+      - name: groups
+        protocol: openid-connect
+        protocolMapper: oidc-group-membership-mapper
+        consentRequired: false
+        config:
+          full.path: "false"
+          id.token.claim: "true"
+          access.token.claim: "true"
+          userinfo.token.claim: "true"
+          claim.name: groups
+  loop: "{{ keycloak_clients }}"
+  loop_control:
+    label: "{{ item.client_id }}"
+  no_log: true

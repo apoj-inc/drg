@@ -1,0 +1,8 @@
+DRG infrastructure public example release
+
+Copyright (c) 2026 the DRG infrastructure authors.
+
+This repository contains original infrastructure automation and references
+third-party tools, providers, collections, and container images. Their names,
+source code, and licenses remain the property of their respective authors.
+See THIRD-PARTY-NOTICES.md.

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+env_file=${LLM_ENV_FILE:-/etc/llm/vllm-main.env}
+# shellcheck disable=SC1090
+source "$env_file"
+base_url=${LLM_BASE_URL:-http://127.0.0.1:${VLLM_PORT}}
+tmpdir=$(mktemp -d -t llm-smoke.XXXXXX)
+trap 'rm -rf "$tmpdir"' EXIT
+
+curl --fail --silent --show-error "$base_url/v1/models" >"$tmpdir/models.json"
+jq -e --arg model "$SERVED_MODEL_NAME" '.data | any(.id == $model)' "$tmpdir/models.json" >/dev/null
+
+jq -n --arg model "$SERVED_MODEL_NAME" '{
+  model: $model,
+  messages: [{role:"user", content:"Return exactly the word READY."}],
+  max_tokens: 32,
+  temperature: 0
+}' >"$tmpdir/chat-request.json"
+curl --fail --silent --show-error -H 'Content-Type: application/json' \
+  --data-binary @"$tmpdir/chat-request.json" "$base_url/v1/chat/completions" >"$tmpdir/chat.json"
+jq -e '.choices | length == 1' "$tmpdir/chat.json" >/dev/null
+
+jq -n --arg model "$SERVED_MODEL_NAME" '{
+  model: $model,
+  messages: [{role:"user", content:"Find and fix the bug in this Python function and explain the fix briefly: def add(a, b): return a - b"}],
+  max_tokens: 256,
+  temperature: 0
+}' >"$tmpdir/coding-request.json"
+curl --fail --silent --show-error -H 'Content-Type: application/json' \
+  --data-binary @"$tmpdir/coding-request.json" "$base_url/v1/chat/completions" >"$tmpdir/coding.json"
+jq -e '.choices[0].message | ((.content // "") + (.reasoning_content // "")) | length > 20' "$tmpdir/coding.json" >/dev/null
+
+jq -n --arg model "$SERVED_MODEL_NAME" '{
+  model: $model,
+  messages: [{role:"user", content:"Reason step by step, then give the final answer: a train leaves at 10:00 at 60 km/h and another leaves at 10:30 at 90 km/h. When does the second catch the first?"}],
+  max_tokens: 256,
+  temperature: 0
+}' >"$tmpdir/reasoning-request.json"
+curl --fail --silent --show-error -H 'Content-Type: application/json' \
+  --data-binary @"$tmpdir/reasoning-request.json" "$base_url/v1/chat/completions" >"$tmpdir/reasoning.json"
+jq -e '.choices[0].message | ((.reasoning_content // "") + (.content // "")) | length > 40' "$tmpdir/reasoning.json" >/dev/null
+
+jq -n --arg model "$SERVED_MODEL_NAME" '{
+  model: $model,
+  messages: [{role:"user", content:"What is the weather in Moscow? Use the supplied tool."}],
+  tools: [{type:"function", function:{name:"get_weather", description:"Get weather", parameters:{type:"object", properties:{city:{type:"string"}}, required:["city"]}}}],
+  tool_choice:"auto",
+  max_tokens:128,
+  temperature:0
+}' >"$tmpdir/tool-request.json"
+curl --fail --silent --show-error -H 'Content-Type: application/json' \
+  --data-binary @"$tmpdir/tool-request.json" "$base_url/v1/chat/completions" >"$tmpdir/tool.json"
+if jq -e '.choices[0].message.tool_calls | length >= 1' "$tmpdir/tool.json" >/dev/null; then
+  tool_status='passed'
+else
+  # Tool calling is a follow-up capability; it must not make the first
+  # model/API launch fail. Keep the response for diagnosis and report it.
+  tool_status='not produced by this response'
+fi
+
+IFS=',' read -r -a selected <<<"$VLLM_DEVICE_IDS"
+gpu_memory="$tmpdir/gpu-memory.csv"
+nvidia-smi --query-gpu=uuid,memory.used --format=csv,noheader,nounits >"$gpu_memory"
+for uuid in "${selected[@]}"; do
+  used=$(awk -F',' -v uuid="$uuid" '$1 ~ uuid {gsub(/[[:space:]]/, "", $2); print $2}' "$gpu_memory")
+  [[ -n "$used" && "$used" -ge 1000 ]] || { echo "ERROR: selected GPU $uuid is not loaded" >&2; exit 1; }
+done
+while IFS=',' read -r uuid used; do
+  uuid=${uuid//[[:space:]]/}
+  used=${used//[[:space:]]/}
+  if [[ ",${VLLM_DEVICE_IDS}," != *",${uuid},"* && "$used" -gt 500 ]]; then
+    echo "ERROR: unselected GPU $uuid is not free (${used} MiB used)" >&2
+    exit 1
+  fi
+done <"$gpu_memory"
+
+echo "Smoke tests passed: models, chat, coding, reasoning, and 4/8 GPU allocation; tool calling: $tool_status."

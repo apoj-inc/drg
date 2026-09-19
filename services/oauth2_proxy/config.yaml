@@ -1,0 +1,95 @@
+---
+service:
+  name: oauth2-proxy
+  topology: replicated
+  description: Keycloak-backed OAuth2 Proxy for Traefik forward authentication.
+  tags: [opentofu, oauth2-proxy, keycloak, traefik-managed-route]
+
+startup:
+  order: 110
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+rollout:
+  by_contour: true
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1032
+      B:
+        start: 1042
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+
+compute:
+  cpu_cores: 1
+  memory_mb: 1024
+  swap_mb: 512
+  disk_gb: 10
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: identity
+      dns_name_pattern: oauth2-proxy-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: oauth2.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+oauth2_proxy:
+  image_tag: v7.15.3
+  listen_address: 0.0.0.0
+  http_port: 4180
+  metrics_port: 44180
+  hostname: https://oauth2.example.test
+  issuer_url: https://keycloak.example.test/realms/drg
+  client_id: oauth2-proxy
+  cookie_domain: .example.test
+  cookie_name: _oauth2_proxy
+  cookie_expire: 8h
+  cookie_refresh: 1h
+  cookie_samesite: lax
+  redirect_url: https://oauth2.example.test/oauth2/callback
+  upstream: static://202
+  email_domains: '*'
+  whitelist_domains:
+    - "*.example.test"
+  insecure_oidc_allow_unverified_email: true
+  scope: openid profile email
+  trusted_proxy_ips: 198.51.100.0/24,192.0.2.0/24,198.51.100.0/24
+  set_xauthrequest: true
+  pass_authorization_header: true
+  pass_access_token: true
+  set_authorization_header: true
+  reverse_proxy: true
+
+secrets:
+  path: kv/services/oauth2-proxy
+  fields:
+    - keycloak_oauth2_proxy_client_secret
+    - oauth2_proxy_cookie_secret
+
+freeipa_client:
+  hostgroups: [service-oauth2-proxy]

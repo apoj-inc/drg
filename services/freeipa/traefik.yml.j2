@@ -1,0 +1,31 @@
+---
+http:
+  - name: freeipa
+    host: "ipa.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    service: freeipa-svc
+    backend_port: 443
+    backend_scheme: https
+    servers_transport: freeipa-tls
+    middlewares:
+      - lan-and-vpn-only
+      - secure-headers
+      - rate-limit
+      - freeipa-host
+    pass_host_header: true
+    health_check:
+      path: /ipa/ui/
+      scheme: https
+      followRedirects: false
+      interval: 10s
+      timeout: 3s
+    sticky_cookie:
+      name: freeipa_backend
+      secure: true
+      httpOnly: true
+      sameSite: strict
+
+servers_transports:
+  freeipa-tls:
+    rootCAs:
+      - /etc/traefik/config/freeipa-ca.crt
+    serverName: ipa-ca.example.test

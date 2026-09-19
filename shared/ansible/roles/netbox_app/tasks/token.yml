@@ -1,0 +1,100 @@
+---
+- name: Ensure NetBox v2 superuser API token exists and read its key
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - exec
+      - -T
+      - netbox
+      - /opt/netbox/venv/bin/python
+      - /opt/netbox/netbox/manage.py
+      - shell
+  args:
+    chdir: "{{ netbox_compose_dir }}"
+    stdin: |
+      import os
+      import sys
+      import time
+      from django.conf import settings
+      from django.contrib.auth import get_user_model
+      from users.models import Token
+
+      # Ensure Django is properly initialized
+      os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'netbox.settings')
+
+      username = {{ netbox_superuser_name | to_json }}
+      secret = {{ netbox_superuser_api_token | to_json }}
+      description = 'ansible-bootstrap'
+
+      # Add a small delay to ensure service is ready
+      time.sleep(30)
+
+      try:
+          User = get_user_model()
+          user = User.objects.get(username=username)
+      except Exception as e:
+          print(f"Error getting user: {e}", file=sys.stderr)
+          sys.exit(1)
+
+      token = None
+      try:
+          for candidate in Token.objects.filter(user=user, version=2, enabled=True):
+              if candidate.validate(secret):
+                  token = candidate
+                  break
+      except Exception as e:
+          print(f"Error finding existing token: {e}", file=sys.stderr)
+
+      if token is None:
+          try:
+              token = Token(
+                  user=user,
+                  description=description,
+                  version=2,
+                  token=secret,
+                  write_enabled=True,
+                  enabled=True,
+              )
+              token.full_clean()
+              token.save()
+              # Small delay to ensure token is created and available
+              time.sleep(2)
+          except Exception as e:
+              print(f"Error creating token: {e}", file=sys.stderr)
+              sys.exit(1)
+
+      print(f'__NETBOX_API_KEY__{token.key}')
+  register: netbox_superuser_api_key_result
+  changed_when: false
+  no_log: true
+  retries: 5
+  delay: 15
+  until: netbox_superuser_api_key_result is succeeded
+
+- name: Validate NetBox token creation result
+  ansible.builtin.assert:
+    that:
+      - netbox_superuser_api_key_result.rc == 0
+      - "'__NETBOX_API_KEY__' in netbox_superuser_api_key_result.stdout"
+    fail_msg: NetBox API token creation failed or returned no API key.
+  no_log: true
+
+- name: Build full NetBox v2 bearer token
+  ansible.builtin.set_fact:
+    netbox_token: "nbt_{{ netbox_superuser_api_key_result.stdout | regex_search('__NETBOX_API_KEY__(\\S+)', '\\1') | first }}.{{ netbox_superuser_api_token }}"
+  no_log: true
+
+- name: Verify NetBox API v2 token using direct API call
+  ansible.builtin.uri:
+    url: "http://localhost:{{ netbox_http_port }}/api/"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ netbox_token }}"
+      Accept: application/json
+    status_code: 200
+    timeout: 30
+  changed_when: false
+  no_log: true
+  retries: 3
+  delay: 5

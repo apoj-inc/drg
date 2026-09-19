@@ -1,0 +1,17 @@
+---
+network:
+  external:
+    name: provider-external
+    physical_network: physnet1
+    network_type: flat
+    mtu: 1500
+    shared: true
+  tenant:
+    name: services
+    cidr: 203.0.113.0/24
+    gateway_ip: 203.0.113.1
+    # The example Neutron backend advertises a maximum MTU of 1442.
+    mtu: 1440
+    dns_nameservers: []
+    router_name: services-router
+    tenant_project_id_variable: tenant_project_id

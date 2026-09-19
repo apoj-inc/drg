@@ -1,0 +1,164 @@
+{% set enabled_http_routes = traefik_route_config.http | default([]) -%}
+{% set enabled_tcp_routes = traefik_route_config.tcp | default([]) -%}
+{% set enabled_udp_routes = traefik_route_config.udp | default([]) -%}
+{% if enabled_http_routes | length > 0 %}
+http:
+  routers:
+{% for route in enabled_http_routes %}
+    {{ route.name }}:
+{% if route.rule is defined %}
+      rule: "{{ route.rule }}"
+{% else %}
+      rule: "Host(`{{ route.host }}`)"
+{% endif %}
+      entryPoints:
+{% for entrypoint in route.entrypoints | default(['websecure']) %}
+        - {{ entrypoint }}
+{% endfor %}
+      service: {{ route.service | default(route.name) }}
+{% if route.middlewares | default([]) | length > 0 %}
+      middlewares:
+{% for middleware in route.middlewares %}
+{% if route.auth_provider | default('authentik') == 'keycloak' and middleware == 'authentik-auth' %}
+        - keycloak-auth
+{% elif route.auth_provider | default('authentik') == 'keycloak' and middleware == 'secured-chain' %}
+        - keycloak-secured-chain
+{% else %}
+        - {{ middleware }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if route.priority is defined %}
+      priority: {{ route.priority }}
+{% endif %}
+      tls:
+        certResolver: {{ route.cert_resolver | default('letsencrypt') }}
+{% endfor %}
+{% set route_groups = namespace(load_balancer_routes=[], external_load_balancer_routes=[]) %}
+{% for route in enabled_http_routes %}
+{% if route.get('backend_port') is not none %}
+{% set route_groups.load_balancer_routes = route_groups.load_balancer_routes + [route] %}
+{% endif %}
+{% if route.get('backend_url') is not none %}
+{% set route_groups.external_load_balancer_routes = route_groups.external_load_balancer_routes + [route] %}
+{% endif %}
+{% endfor %}
+{% set load_balancer_routes = route_groups.load_balancer_routes %}
+{% set external_load_balancer_routes = route_groups.external_load_balancer_routes %}
+{% set all_load_balancer_routes = load_balancer_routes + external_load_balancer_routes %}
+{% if all_load_balancer_routes | length > 0 %}
+  services:
+{% set emitted_service_names = namespace(values=[]) %}
+{% for route in all_load_balancer_routes %}
+{% set service_name = route.service | default(route.name) %}
+{% if service_name not in emitted_service_names.values %}
+{% set emitted_service_names.values = emitted_service_names.values + [service_name] %}
+    {{ service_name }}:
+      loadBalancer:
+        servers:
+{% if route.get('backend_url') is not none %}
+          - url: "{{ route.backend_url }}"
+{% else %}
+{% if traefik_route_backend_hosts is defined and traefik_route_backend_hosts | length > 0 %}
+{% for backend_host in traefik_route_backend_hosts %}
+          - url: "{{ route.backend_scheme | default('http') }}://{{ backend_host }}:{{ route.backend_port }}"
+{% endfor %}
+{% else %}
+          - url: "{{ route.backend_scheme | default('http') }}://{{ traefik_route_backend_host | default(ansible_ip | default(ansible_host, true), true) }}:{{ route.backend_port }}"
+{% endif %}
+{% endif %}
+{% if route.servers_transport is defined %}
+        serversTransport: {{ route.servers_transport }}
+{% endif %}
+{% if route.pass_host_header is defined %}
+        passHostHeader: {{ route.pass_host_header | bool | lower }}
+{% endif %}
+{% if route.health_check is defined %}
+        healthCheck:
+{% for key, value in route.health_check.items() %}
+          {{ key }}: {{ value | tojson }}
+{% endfor %}
+{% endif %}
+{% if route.sticky_cookie is defined %}
+        sticky:
+          cookie:
+{% for key, value in route.sticky_cookie.items() %}
+            {{ key }}: {{ value | tojson }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if traefik_route_config.servers_transports | default({}) | length > 0 %}
+  serversTransports:
+{% for name, transport in traefik_route_config.servers_transports.items() %}
+    {{ name }}:
+{% for key, value in transport.items() %}
+      {{ key }}: {{ value | tojson }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% if enabled_tcp_routes | length > 0 %}
+tcp:
+  routers:
+{% for route in enabled_tcp_routes %}
+    {{ route.name }}:
+      entryPoints:
+{% for entrypoint in route.entrypoints | default([route.name]) %}
+        - {{ entrypoint }}
+{% endfor %}
+      rule: "{{ route.rule | default('HostSNI(`*`)') }}"
+      service: {{ route.service | default(route.name) }}
+{% endfor %}
+  services:
+{% for route in enabled_tcp_routes %}
+    {{ route.service | default(route.name) }}:
+      loadBalancer:
+        servers:
+{% if route.get('backend_addresses') is not none %}
+{% for backend_address in route.backend_addresses %}
+          - address: "{{ backend_address }}"
+{% endfor %}
+{% elif route.get('backend_address') is not none %}
+          - address: "{{ route.backend_address }}"
+{% else %}
+{% if traefik_route_backend_hosts is defined and traefik_route_backend_hosts | length > 0 %}
+{% for backend_host in traefik_route_backend_hosts %}
+          - address: "{{ backend_host }}:{{ route.backend_port }}"
+{% endfor %}
+{% else %}
+          - address: "{{ traefik_route_backend_host | default(ansible_ip | default(ansible_host, true), true) }}:{{ route.backend_port }}"
+{% endif %}
+{% endif %}
+{% if route.health_check is defined %}
+        healthCheck:
+{% for key, value in route.health_check.items() %}
+          {{ key }}: {{ value | tojson }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if enabled_udp_routes | length > 0 %}
+udp:
+  routers:
+{% for route in enabled_udp_routes %}
+    {{ route.name }}:
+      entryPoints:
+{% for entrypoint in route.entrypoints | default([route.name]) %}
+        - {{ entrypoint }}
+{% endfor %}
+      service: {{ route.service | default(route.name) }}
+{% endfor %}
+  services:
+{% for route in enabled_udp_routes %}
+    {{ route.service | default(route.name) }}:
+      loadBalancer:
+        servers:
+{% if route.get('backend_address') is not none %}
+          - address: "{{ route.backend_address }}"
+{% else %}
+          - address: "{{ traefik_route_backend_host | default(ansible_ip | default(ansible_host, true), true) }}:{{ route.backend_port }}"
+{% endif %}
+{% endfor %}
+{% endif %}

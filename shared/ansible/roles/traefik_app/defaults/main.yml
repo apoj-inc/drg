@@ -1,0 +1,9 @@
+---
+traefik_compose_dir: /opt/traefik
+traefik_image: "traefik:{{ traefik_image_tag }}"
+traefik_host_entries: []
+traefik_metrics_enabled: false
+traefik_metrics_entrypoint: metrics
+traefik_metrics_listen_port: 8082
+traefik_middlewares_file: ""
+traefik_middlewares: {}

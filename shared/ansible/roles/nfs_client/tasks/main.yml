@@ -1,0 +1,49 @@
+---
+- name: Validate NFS client settings
+  ansible.builtin.assert:
+    that:
+      - nfs_client_server | string | length > 0
+      - nfs_client_export | string | length > 0
+      - nfs_client_mountpoint | string | length > 0
+    fail_msg: "NFS server, export and mountpoint are required."
+
+- name: Install NFS and xattr utilities
+  ansible.builtin.apt:
+    name:
+      - nfs-common
+      - attr
+    state: present
+    update_cache: true
+
+- name: Ensure NFS mountpoint exists
+  ansible.builtin.file:
+    path: "{{ nfs_client_mountpoint }}"
+    state: directory
+    owner: "{{ nfs_client_owner }}"
+    group: "{{ nfs_client_group }}"
+    mode: "{{ nfs_client_mode }}"
+
+- name: Mount NFS export
+  ansible.posix.mount:
+    path: "{{ nfs_client_mountpoint }}"
+    src: "{{ nfs_client_server }}:{{ nfs_client_export }}"
+    fstype: nfs
+    opts: "{{ nfs_client_mount_options }}"
+    state: mounted
+
+- name: Verify NFS mount is active
+  ansible.builtin.command: mountpoint -q "{{ nfs_client_mountpoint }}"
+  changed_when: false
+
+- name: Verify NFS extended attributes
+  ansible.builtin.shell: |
+    set -eu
+    probe="{{ nfs_client_mountpoint }}/.nfs-xattr-probe"
+    touch "$probe"
+    setfattr -n user.nfs_probe -v ok "$probe"
+    test "$(getfattr --only-values -n user.nfs_probe "$probe")" = ok
+    rm -f "$probe"
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: nfs_client_validate_xattrs | bool

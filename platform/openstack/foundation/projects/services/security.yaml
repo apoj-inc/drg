@@ -1,0 +1,135 @@
+---
+security:
+  management_cidr: 192.0.2.0/24
+  groups:
+    sg-management:
+      description: Management SSH and diagnostics
+      rules:
+        ssh:
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+          remote_ip_prefix: management_cidr
+        icmp:
+          protocol: icmp
+          remote_ip_prefix: management_cidr
+    sg-web-backend:
+      description: HTTP backends reachable from Traefik
+      rules:
+        http:
+          protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+          remote_group_name: sg-traefik
+        https:
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+          remote_group_name: sg-traefik
+    sg-traefik:
+      description: Traefik ingress
+      rules:
+        http:
+          protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+          remote_ip_prefix: management_cidr
+        https:
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+          remote_ip_prefix: management_cidr
+    sg-dns:
+      description: DNS service
+      rules:
+        udp:
+          protocol: udp
+          port_range_min: 53
+          port_range_max: 53
+          remote_ip_prefix: management_cidr
+        tcp:
+          protocol: tcp
+          port_range_min: 53
+          port_range_max: 53
+          remote_ip_prefix: management_cidr
+    sg-monitoring:
+      description: Monitoring exporters
+      rules:
+        node_exporter:
+          protocol: tcp
+          port_range_min: 9100
+          port_range_max: 9100
+          remote_ip_prefix: management_cidr
+    sg-etcd:
+      description: etcd client and peer traffic
+      rules:
+        client:
+          protocol: tcp
+          port_range_min: 2379
+          port_range_max: 2379
+          remote_group_name: sg-postgresql
+        peer:
+          protocol: tcp
+          port_range_min: 2380
+          port_range_max: 2380
+          remote_group_name: sg-etcd
+    sg-postgresql:
+      description: PostgreSQL cluster and client traffic
+      rules:
+        postgres:
+          protocol: tcp
+          port_range_min: 5432
+          port_range_max: 5432
+          remote_group_name: sg-postgresql
+        pgbouncer:
+          protocol: tcp
+          port_range_min: 6432
+          port_range_max: 6432
+          remote_group_name: sg-postgresql
+    sg-redis:
+      description: Redis and Sentinel traffic
+      rules:
+        redis:
+          protocol: tcp
+          port_range_min: 6379
+          port_range_max: 6379
+          remote_group_name: sg-redis
+        sentinel:
+          protocol: tcp
+          port_range_min: 26379
+          port_range_max: 26379
+          remote_group_name: sg-redis
+    sg-freeipa:
+      description: FreeIPA LDAP and Kerberos traffic
+      rules:
+        ldap:
+          protocol: tcp
+          port_range_min: 389
+          port_range_max: 389
+          remote_group_name: sg-keycloak
+        ldaps:
+          protocol: tcp
+          port_range_min: 636
+          port_range_max: 636
+          remote_group_name: sg-keycloak
+        kerberos:
+          protocol: tcp
+          port_range_min: 88
+          port_range_max: 88
+          remote_group_name: sg-freeipa
+    sg-keycloak:
+      description: Keycloak application traffic
+      rules:
+        http:
+          protocol: tcp
+          port_range_min: 8080
+          port_range_max: 8080
+          remote_group_name: sg-traefik
+    sg-openbao:
+      description: OpenBao API traffic
+      rules:
+        api:
+          protocol: tcp
+          port_range_min: 8200
+          port_range_max: 8200
+          remote_ip_prefix: management_cidr

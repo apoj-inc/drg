@@ -1,0 +1,3 @@
+---
+- name: Bootstrap NetBox superuser token
+  ansible.builtin.import_tasks: token.yml

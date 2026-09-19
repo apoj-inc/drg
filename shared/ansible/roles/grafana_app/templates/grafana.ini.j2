@@ -1,0 +1,12 @@
+[paths]
+data = {{ grafana_data_dir }}
+logs = {{ grafana_log_dir }}
+plugins = {{ grafana_plugins_dir }}
+provisioning = {{ grafana_provisioning_dir }}
+
+[server]
+http_addr = 0.0.0.0
+http_port = 3000
+
+[metrics]
+enabled = {{ grafana_metrics_enabled | lower }}

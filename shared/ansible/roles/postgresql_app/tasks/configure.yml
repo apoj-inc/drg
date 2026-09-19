@@ -1,0 +1,41 @@
+---
+- name: Configure PostgreSQL main settings
+  ansible.builtin.lineinfile:
+    path: "{{ postgresql_conf_dir }}/postgresql.conf"
+    regexp: "^#?\\s*{{ item.key }}\\s*="
+    line: "{{ item.key }} = '{{ item.value }}'"
+  loop: "{{ postgresql_global_config | dict2items }}"
+  notify: Restart PostgreSQL
+- name: Configure PostgreSQL shared preload libraries
+  ansible.builtin.lineinfile:
+    path: "{{ postgresql_conf_dir }}/postgresql.conf"
+    regexp: "^#?\\s*shared_preload_libraries\\s*="
+    line: "shared_preload_libraries = '{{ postgresql_shared_preload_libraries | join(',') }}'"
+  notify: Restart PostgreSQL
+- name: Configure PostgreSQL listen addresses
+  ansible.builtin.lineinfile:
+    path: "{{ postgresql_conf_dir }}/postgresql.conf"
+    regexp: "^#?\\s*listen_addresses\\s*="
+    line: "listen_addresses = '{{ postgresql_listen_address }}'"
+  notify: Restart PostgreSQL
+- name: Configure PostgreSQL port
+  ansible.builtin.lineinfile:
+    path: "{{ postgresql_conf_dir }}/postgresql.conf"
+    regexp: "^#?\\s*port\\s*="
+    line: "port = {{ postgresql_port }}"
+  notify: Restart PostgreSQL
+- name: Write PostgreSQL client authentication rules
+  ansible.builtin.copy:
+    dest: "{{ postgresql_conf_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+    content: |
+      local   all             postgres                                peer
+      local   all             all                                     peer
+      host    all             all             127.0.0.1/32            scram-sha-256
+      host    all             all             ::1/128                 scram-sha-256
+      {% for cidr in postgresql_allowed_cidrs %}
+      host    all             all             {{ "%-21s" | format(cidr) }} scram-sha-256
+      {% endfor %}
+  notify: Restart PostgreSQL

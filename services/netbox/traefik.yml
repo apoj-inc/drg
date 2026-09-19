@@ -1,0 +1,13 @@
+---
+http:
+  - name: netbox
+    host: "netbox.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 8000
+    middlewares:
+      - secure-headers
+      - rate-limit
+    health_check:
+      path: /login/
+      hostname: netbox.example.test
+      interval: 10s
+      timeout: 5s

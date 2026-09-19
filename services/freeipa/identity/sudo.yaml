@@ -1,0 +1,8 @@
+---
+sudo_rules:
+  - name: ansible-ci-managed-linux
+    state: present
+    description: Passwordless automation sudo on repository-managed Linux hosts
+    user: [ansible-ci]
+    hostgroup: [managed-linux]
+    command: ALL

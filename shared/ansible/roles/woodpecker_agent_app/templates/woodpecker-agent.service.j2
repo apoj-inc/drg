@@ -1,0 +1,17 @@
+[Unit]
+Description=Woodpecker CI local Dagger agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ woodpecker_agent_user }}
+Group={{ woodpecker_agent_group }}
+EnvironmentFile={{ woodpecker_agent_env_file }}
+WorkingDirectory={{ woodpecker_agent_state_dir }}
+ExecStart={{ woodpecker_agent_binary }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

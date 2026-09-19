@@ -1,0 +1,9 @@
+---
+- name: Start compose app
+  community.docker.docker_compose_v2:
+    project_src: "{{ compose_app_root }}"
+    files:
+      - "{{ compose_app_compose_file | basename }}"
+    state: present
+    pull: "{{ compose_app_pull_policy }}"
+    remove_orphans: true

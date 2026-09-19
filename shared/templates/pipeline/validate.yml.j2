@@ -1,0 +1,38 @@
+validate:{{ job.service }}:
+  stage: validate
+{% if job.rollout_target_tag %}
+  tags:
+    - {{ job.rollout_target_tag }}
+{% endif %}
+  variables:
+    ANSIBLE_HOST_PATTERN_MISMATCH: warning
+  cache:
+    key:
+      files:
+        - shared/ansible/collections/requirements.yml
+    paths:
+      - .ansible/collections/
+      - .terraform.d/plugin-cache/
+    policy: pull-push
+  script:
+{% if job.terraform_needed %}
+    - command -v tofu
+    - (cd "services/{{ job.service }}/terraform" && tofu init -backend=false && tofu validate)
+{% endif %}
+{% if job.configure_needed %}
+    - command -v ansible-playbook
+    - mkdir -p "$TF_PLUGIN_CACHE_DIR"
+    - command -v ansible-galaxy
+    - |
+      ansible_collections_path="${CI_PROJECT_DIR}/.ansible/collections"
+      mkdir -p "$ansible_collections_path"
+      ansible-galaxy collection install \
+        -r shared/ansible/collections/requirements.yml \
+        -p "$ansible_collections_path"
+      export ANSIBLE_COLLECTIONS_PATH="$ansible_collections_path:/usr/share/ansible/collections"
+    - ansible-playbook -i 'localhost,' "{{ job.playbook }}" --syntax-check
+{% endif %}
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

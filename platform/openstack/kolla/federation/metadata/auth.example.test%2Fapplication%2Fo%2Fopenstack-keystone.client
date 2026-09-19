@@ -1,0 +1,4 @@
+{
+  "client_id": "openstack-keystone",
+  "client_secret": "{{ lookup('ansible.builtin.env', 'OPENSTACK_SECRET_AUTHENTIK_OPENSTACK_CLIENT_SECRET') }}"
+}

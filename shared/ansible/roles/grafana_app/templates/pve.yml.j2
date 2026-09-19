@@ -1,0 +1,9 @@
+{% set pve_token_parts = grafana_proxmox_api_token.split('=', 1) %}
+{% set pve_token_id = pve_token_parts[0] if pve_token_parts | length == 2 else '' %}
+{% set pve_token_value = pve_token_parts[1] if pve_token_parts | length == 2 else grafana_proxmox_api_token %}
+{% set pve_token_id_parts = pve_token_id.split('!', 1) %}
+default:
+  user: {{ (pve_token_id_parts[0] if pve_token_id_parts | length == 2 else grafana_proxmox_user) | to_json }}
+  token_name: {{ (pve_token_id_parts[1] if pve_token_id_parts | length == 2 else grafana_proxmox_token_name) | to_json }}
+  token_value: {{ pve_token_value | to_json }}
+  verify_ssl: {{ grafana_proxmox_verify_ssl | string | lower }}

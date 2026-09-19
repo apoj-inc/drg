@@ -1,0 +1,23 @@
+---
+# Non-interactive service accounts managed by FreeIPA IaC.
+# Passwords are supplied from OpenBao through environment variables and are
+# never committed to the repository.
+users:
+  - name: ansible-ci
+    state: present
+    givenname: Ansible
+    sn: CI
+    password_env: ANSIBLE_CI_PASSWORD
+    password_expiration: 20380119031407Z
+  - name: ipa-enroller
+    state: present
+    givenname: IPA
+    sn: Enroller
+    password_env: IPA_ENROLLER_PASSWORD
+    password_expiration: 20380119031407Z
+  - name: keycloak-bind
+    state: present
+    givenname: Keycloak
+    sn: Bind
+    password_env: KEYCLOAK_FREEIPA_BIND_PASSWORD
+    password_expiration: 20380119031407Z

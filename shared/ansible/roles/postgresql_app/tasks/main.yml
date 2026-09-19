@@ -1,0 +1,160 @@
+---
+- name: Validate PostgreSQL inputs
+  ansible.builtin.assert:
+    that:
+      - postgresql_version | string | length > 0
+      - postgresql_admin_password | string | length > 0
+      - postgresql_prometheus_password | string | length > 0
+      - postgresql_allowed_cidrs | length > 0
+      - postgresql_databases | map(attribute='password') | map('length') | min > 0
+      - not postgresql_patroni_enabled | bool or postgresql_replication_password | string | length > 0
+      - not postgresql_patroni_enabled | bool or postgresql_patroni_dcs_hosts | length == 3
+    fail_msg: PostgreSQL passwords, Patroni DCS hosts, and allowed CIDRs must be provided before deployment.
+  no_log: true
+- name: Validate PostgreSQL static host entries
+  ansible.builtin.assert:
+    that:
+      - item.address is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}$')
+      - item.names | length > 0
+      - item.names | select('match', '^[A-Za-z0-9][A-Za-z0-9.-]*$') | list | length == item.names | length
+    fail_msg: Each PostgreSQL static host entry requires an IPv4 address and one or more valid host names.
+  loop: "{{ postgresql_host_entries }}"
+  loop_control:
+    label: "{{ item.address }}"
+- name: Configure PostgreSQL static host entries
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ item.address | regex_escape }}\\s+.*$"
+    line: "{{ item.address }} {{ item.names | join(' ') }}"
+    state: present
+  loop: "{{ postgresql_host_entries }}"
+  loop_control:
+    label: "{{ item.address }}"
+- name: Persist PostgreSQL static host entries in the cloud-init hosts template
+  ansible.builtin.lineinfile:
+    path: /etc/cloud/templates/hosts.debian.tmpl
+    regexp: "^{{ item.address | regex_escape }}\\s+.*$"
+    line: "{{ item.address }} {{ item.names | join(' ') }}"
+    state: present
+  loop: "{{ postgresql_host_entries }}"
+  loop_control:
+    label: "{{ item.address }}"
+- name: Configure PostgreSQL NFS storage
+  ansible.builtin.import_tasks: nfs.yml
+  when: postgresql_nfs_enabled | bool
+  tags:
+    - nfs
+    - prepare
+- name: Configure PostgreSQL local data disk
+  ansible.builtin.import_tasks: local_disk.yml
+  when: postgresql_data_disk_enabled | bool
+  tags:
+    - disk
+    - prepare
+- name: Apply storage mount dependency before PostgreSQL installation
+  ansible.builtin.meta: flush_handlers
+- name: Install PostgreSQL
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+- name: Configure PostgreSQL
+  ansible.builtin.import_tasks: configure.yml
+  when: not postgresql_patroni_enabled | bool
+  tags:
+    - configure
+- name: Configure PgBouncer
+  ansible.builtin.import_tasks: pgbouncer.yml
+  when:
+    - postgresql_patroni_enabled | bool
+    - postgresql_pgbouncer_enabled | bool
+  tags:
+    - pgbouncer
+    - configure
+- name: Configure Patroni
+  ansible.builtin.import_tasks: patroni.yml
+  when: postgresql_patroni_enabled | bool
+  tags:
+    - patroni
+    - configure
+- name: Apply PostgreSQL configuration before creating databases
+  ansible.builtin.meta: flush_handlers
+- name: Discover Patroni cluster from the configured machine
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ postgresql_patroni_restapi_port }}/cluster"
+    status_code: 200
+  register: postgresql_primary_probes
+  changed_when: false
+  run_once: true
+  when: postgresql_patroni_enabled | bool
+- name: Select the Patroni primary member
+  ansible.builtin.set_fact:
+    postgresql_patroni_primary_members: >-
+      {{ postgresql_primary_probes.json.members |
+         selectattr('role', 'in', ['primary', 'master', 'leader']) | list }}
+  run_once: true
+  when: postgresql_patroni_enabled | bool
+- name: Validate the discovered Patroni primary
+  ansible.builtin.assert:
+    that:
+      - postgresql_patroni_primary_members | length == 1
+      - postgresql_patroni_primary_members[0].name | length > 0
+      - postgresql_patroni_primary_members[0].host | default('') | length > 0
+    fail_msg: "Unable to identify exactly one Patroni primary member."
+  run_once: true
+  when: postgresql_patroni_enabled | bool
+- name: Store current Patroni primary member
+  ansible.builtin.set_fact:
+    postgresql_primary_member: "{{ postgresql_patroni_primary_members[0].name }}"
+    postgresql_primary_database_host: "{{ postgresql_database_host }}"
+    postgresql_primary_database_port: "{{ postgresql_database_port }}"
+  run_once: true
+  when: postgresql_patroni_enabled | bool
+- name: Create PostgreSQL roles and databases
+  ansible.builtin.import_tasks: databases.yml
+  when: not postgresql_patroni_enabled | bool or postgresql_primary_member is defined
+  run_once: true
+  tags:
+    - databases
+- name: Reconcile missing application databases before healthcheck
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      if ! psql --quiet --no-align --tuples-only --set=role_name="$POSTGRESQL_OWNER" <<'SQL' | grep -qx 1
+      SELECT 1 FROM pg_roles WHERE rolname = :'role_name';
+      SQL
+      then
+        psql --quiet --set=role_name="$POSTGRESQL_OWNER" --set=role_password="$POSTGRESQL_PASSWORD" <<'SQL'
+        CREATE ROLE :"role_name" LOGIN PASSWORD :'role_password';
+      SQL
+      fi
+      if ! psql --quiet --no-align --tuples-only --set=database_name="$POSTGRESQL_DATABASE" <<'SQL' | grep -qx 1
+      SELECT 1 FROM pg_database WHERE datname = :'database_name';
+      SQL
+      then
+        createdb --owner "$POSTGRESQL_OWNER" \
+          --encoding "{{ postgresql_encoding }}" \
+          --locale "{{ postgresql_locale }}" \
+          --template template0 \
+          "$POSTGRESQL_DATABASE"
+      fi
+    executable: /bin/bash
+  loop: "{{ postgresql_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
+  environment:
+    POSTGRESQL_DATABASE: "{{ item.name }}"
+    POSTGRESQL_OWNER: "{{ item.owner }}"
+    POSTGRESQL_PASSWORD: "{{ item.password }}"
+    PGHOST: "{{ postgresql_primary_database_host | default(postgresql_database_host) }}"
+    PGPORT: "{{ postgresql_primary_database_port | default(postgresql_database_port) }}"
+    PGUSER: "{{ postgresql_database_user }}"
+    PGPASSWORD: "{{ postgresql_admin_password }}"
+  changed_when: false
+  no_log: true
+  when: not postgresql_patroni_enabled | bool or postgresql_primary_member is defined
+  run_once: true
+- name: Check PostgreSQL health
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck

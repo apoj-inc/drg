@@ -1,0 +1,11 @@
+---
+- name: Restart Pacemaker HA Corosync
+  ansible.builtin.systemd:
+    name: corosync
+    state: restarted
+
+- name: Restart Pacemaker HA Pacemaker
+  ansible.builtin.systemd:
+    name: pacemaker
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,11 @@
+---
+services:
+  octodns:
+    image: local/octodns-netbox-powerdns:1.0
+    build:
+      context: .
+    network_mode: host
+    env_file:
+      - ./.env
+    volumes:
+      - ./octodns.yaml:/config/octodns.yaml:ro

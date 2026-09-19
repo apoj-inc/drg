@@ -1,0 +1,7 @@
+---
+name: agent-runtime
+rules:
+  - path: kv/data/hosts/{{identity.entity.aliases.auth_cert_ipa_host_bootstrap.name}}/*
+    capabilities: [read]
+  - path: kv/metadata/hosts/{{identity.entity.aliases.auth_cert_ipa_host_bootstrap.name}}/*
+    capabilities: [list]

@@ -1,0 +1,14 @@
+---
+http:
+  - name: keycloak
+    host: "keycloak.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 8080
+    health_check:
+      path: /health/ready
+      port: 9000
+      scheme: http
+      interval: 10s
+      timeout: 3s
+    middlewares:
+      - secure-headers
+      - rate-limit

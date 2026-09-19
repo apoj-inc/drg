@@ -1,0 +1,8 @@
+dummy:
+  stage: plan
+  script:
+    - echo "No services changed or no changes detected."
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

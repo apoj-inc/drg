@@ -1,0 +1,210 @@
+# This file seeds NetBox with an initial Proxmox SDN model.
+# After bootstrap, NetBox core objects are the source of truth:
+# Terraform must discover live VRF/L2VPN/Prefix/IP objects from NetBox,
+# not read this Ansible seed file.
+netbox_site: example
+netbox_cluster_name: example-cluster
+
+proxmox_sdn_tags:
+  - name: proxmox-sdn
+    slug: proxmox-sdn
+    color: 2196f3
+    description: Objects participating in Proxmox SDN desired state
+  - name: proxmox-underlay
+    slug: proxmox-underlay
+    color: 607d8b
+    description: OpenFabric underlay objects
+  - name: proxmox-evpn
+    slug: proxmox-evpn
+    color: 4caf50
+    description: EVPN overlay objects
+  - name: terraform-managed
+    slug: terraform-managed
+    color: ff9800
+    description: Objects intended for Terraform discovery and reconciliation
+  - name: netbox-managed
+    slug: netbox-managed
+    color: 00bcd4
+    description: IP addresses allocated by Terraform from NetBox IPAM
+  - name: terraform-observed
+    slug: terraform-observed
+    color: 9e9e9e
+    description: Static or legacy addresses recorded by Terraform for audit and drift detection
+
+proxmox_sdn_config_context:
+  name: proxmox-sdn-terraform-selectors
+  description: Selectors and defaults used by Terraform to discover Proxmox SDN desired state from live NetBox objects.
+  weight: 1000
+  data:
+    proxmox_sdn:
+      enabled: true
+      cluster: example-cluster
+      terraform:
+        object_tag: proxmox-sdn
+        managed_tag: terraform-managed
+        evpn_tag: proxmox-evpn
+        underlay_tag: proxmox-underlay
+        managed_status: active
+        zone_object_type: vrf
+        vnet_object_type: l2vpn
+        subnet_object_type: prefix
+        gateway_object_type: ipaddress
+      fabric:
+        id: example-fabric
+        name: pve-openfabric
+        protocol: openfabric
+        mtu: 9000
+        loopback_tag: proxmox-underlay
+        fabric_tag: proxmox-underlay
+      controller_defaults:
+        type: evpn
+        asn: 65000
+        source: loopback
+
+proxmox_sdn_underlay:
+  proxmox_sdn_id: example-fabric
+  name: pve-openfabric
+  protocol: openfabric
+  mtu: 9000
+  prefixes:
+    - prefix: 203.0.113.0/24
+      role: loopback
+      description: Proxmox OpenFabric loopback/router-id pool
+      tags:
+        - proxmox-sdn
+        - proxmox-underlay
+        - terraform-managed
+    - prefix: 198.51.100.0/24
+      role: fabric
+      description: Proxmox OpenFabric underlay transit pool
+      tags:
+        - proxmox-sdn
+        - proxmox-underlay
+        - terraform-managed
+
+proxmox_nodes:
+  - name: pve1
+    proxmox_sdn_id: pve1
+    role: evpn-node
+    management_ip: 192.0.2.101
+    loopback: 203.0.113.1/32
+    fabric_ip: 198.51.100.1/24
+    fabric_interfaces:
+      - eno1
+    tags:
+      - proxmox-sdn
+      - proxmox-underlay
+      - terraform-managed
+  - name: pve2
+    proxmox_sdn_id: pve2
+    role: evpn-node
+    management_ip: 192.0.2.102
+    loopback: 203.0.113.2/32
+    fabric_ip: 198.51.100.2/24
+    fabric_interfaces:
+      - eno1
+    tags:
+      - proxmox-sdn
+      - proxmox-underlay
+      - terraform-managed
+  - name: pve3
+    proxmox_sdn_id: pve3
+    role: evpn-node
+    management_ip: 192.0.2.103
+    loopback: 203.0.113.3/32
+    fabric_ip: 198.51.100.3/24
+    fabric_interfaces:
+      - eno1
+    tags:
+      - proxmox-sdn
+      - proxmox-underlay
+      - terraform-managed
+
+proxmox_sdn_controllers:
+  - name: evpn-main
+    proxmox_sdn_id: evpnmain
+    type: evpn
+    asn: 65000
+    source: loopback
+    nodes:
+      - pve1
+      - pve2
+      - pve3
+    tags:
+      - proxmox-sdn
+      - proxmox-evpn
+      - terraform-managed
+
+proxmox_sdn_zones:
+  - name: prod
+    proxmox_sdn_id: prod
+    type: evpn
+    controller: evpn-main
+    vrf: vrf-prod
+    vrf_vni: 10000
+    route_target: "65000:10000"
+    exitnodes:
+      - pve1
+    primary_exitnode: pve1
+    exitnodes_local_routing: false
+    vlan_group: pve-prod
+    tags:
+      - proxmox-sdn
+      - proxmox-evpn
+      - terraform-managed
+    vnets:
+      - name: prod-app
+        proxmox_sdn_id: prodapp
+        vlan_id: 100
+        vni: 10100
+        route_target: "65000:10100"
+        subnet: 198.51.100.0/24
+        gateway: 198.51.100.1/24
+        snat: false
+        tags:
+          - proxmox-sdn
+          - proxmox-evpn
+          - terraform-managed
+
+      - name: prod-db
+        proxmox_sdn_id: proddb
+        vlan_id: 110
+        vni: 10110
+        route_target: "65000:10110"
+        subnet: 203.0.113.0/24
+        gateway: 203.0.113.1/24
+        snat: false
+        tags:
+          - proxmox-sdn
+          - proxmox-evpn
+          - terraform-managed
+
+  - name: dmz
+    proxmox_sdn_id: dmz
+    type: evpn
+    controller: evpn-main
+    vrf: vrf-dmz
+    vrf_vni: 20000
+    route_target: "65000:20000"
+    exitnodes:
+      - pve1
+    primary_exitnode: pve1
+    exitnodes_local_routing: false
+    vlan_group: pve-dmz
+    tags:
+      - proxmox-sdn
+      - proxmox-evpn
+      - terraform-managed
+    vnets:
+      - name: dmz-web
+        proxmox_sdn_id: dmzweb
+        vlan_id: 200
+        vni: 10200
+        route_target: "65000:10200"
+        subnet: 192.0.2.0/24
+        gateway: 192.0.2.1/24
+        snat: false
+        tags:
+          - proxmox-sdn
+          - proxmox-evpn
+          - terraform-managed

@@ -1,0 +1,11 @@
+---
+- name: Deploy node exporter to all NetBox-managed runtime services
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('all', true) }}"
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - monitoring_agent

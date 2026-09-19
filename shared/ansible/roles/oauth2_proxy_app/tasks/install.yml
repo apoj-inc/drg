@@ -1,0 +1,12 @@
+---
+- name: Install Docker
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure OAuth2 Proxy directory exists
+  ansible.builtin.file:
+    path: "{{ oauth2_proxy_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

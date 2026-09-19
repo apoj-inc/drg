@@ -1,0 +1,20 @@
+update_docker_image:
+  stage: {{ job.stage }}
+  environment:
+    name: $ENVIRONMENT/docker
+  inputs:
+    pull_image:
+      description: 'Remote tag to pull'
+      default: ''
+    local_tag:
+      description: 'Local tag to push'
+      default: ''
+  script:
+    - docker pull $(job.inputs.pull_image)
+    - export tag="$DOCKERHUB_URL/$(job.inputs.local_tag)"
+    - docker image tag $(job.inputs.pull_image) $tag
+    - docker push $tag
+    - docker image rm $tag
+  {% if job.when %}
+  when: "{{ job.when }}"
+  {% endif %}

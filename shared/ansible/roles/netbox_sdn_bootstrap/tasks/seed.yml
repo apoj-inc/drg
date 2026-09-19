@@ -1,0 +1,477 @@
+---
+- name: Use venv Python for NetBox Ansible modules
+  ansible.builtin.set_fact:
+    ansible_python_interpreter: /opt/ansible-netbox-venv/bin/python
+- name: Create NetBox site
+  netbox.netbox.netbox_site:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ netbox_site }}"
+      slug: "{{ netbox_site }}"
+      status: active
+    state: present
+- name: Create Proxmox cluster type
+  netbox.netbox.netbox_cluster_type:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: Proxmox VE
+    state: present
+- name: Create Proxmox cluster group
+  netbox.netbox.netbox_cluster_group:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: Proxmox
+    state: present
+- name: Create Proxmox virtualization cluster
+  netbox.netbox.netbox_cluster:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ netbox_cluster_name }}"
+      cluster_type: Proxmox VE
+      cluster_group: Proxmox
+      scope_type: dcim.site
+      scope: "{{ netbox_site }}"
+    state: present
+- name: Create tags for Terraform SDN discovery
+  netbox.netbox.netbox_tag:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.name }}"
+      slug: "{{ item.slug }}"
+      color: "{{ item.color }}"
+      description: "{{ item.description }}"
+    state: present
+  loop: "{{ proxmox_sdn_tags }}"
+- name: Create custom fields for Proxmox SDN metadata
+  netbox.netbox.netbox_custom_field:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.name }}"
+      label: "{{ item.label }}"
+      type: "{{ item.type }}"
+      object_types: "{{ item.object_types }}"
+      required: false
+    state: present
+  loop:
+    - name: proxmox_sdn_zone
+      label: Proxmox SDN Zone
+      type: text
+      object_types:
+        - ipam.vrf
+        - ipam.vlan
+        - ipam.prefix
+        - ipam.ipaddress
+        - vpn.l2vpn
+        - ipam.routetarget
+    - name: proxmox_sdn_zone_type
+      label: Proxmox SDN Zone Type
+      type: text
+      object_types:
+        - ipam.vrf
+        - ipam.vlan
+        - ipam.prefix
+        - ipam.ipaddress
+        - vpn.l2vpn
+        - ipam.routetarget
+    - name: proxmox_vnet
+      label: Proxmox VNet
+      type: text
+      object_types:
+        - ipam.vlan
+        - ipam.prefix
+        - ipam.ipaddress
+        - vpn.l2vpn
+        - ipam.routetarget
+    - name: proxmox_vni
+      label: Proxmox VNI
+      type: integer
+      object_types:
+        - ipam.vlan
+        - ipam.prefix
+        - ipam.ipaddress
+        - vpn.l2vpn
+        - ipam.routetarget
+    - name: proxmox_sdn_controller
+      label: Proxmox SDN Controller
+      type: text
+      object_types:
+        - ipam.vrf
+        - ipam.vlan
+        - ipam.prefix
+        - ipam.ipaddress
+        - vpn.l2vpn
+        - ipam.routetarget
+    - name: proxmox_sdn_id
+      label: Proxmox SDN ID
+      type: text
+      object_types:
+        - ipam.vrf
+        - ipam.vlan
+        - ipam.prefix
+        - ipam.ipaddress
+        - vpn.l2vpn
+        - ipam.routetarget
+    - name: proxmox_vrf_vni
+      label: Proxmox VRF VNI
+      type: integer
+      object_types:
+        - ipam.vrf
+        - ipam.prefix
+        - vpn.l2vpn
+    - name: proxmox_snat
+      label: Proxmox SNAT
+      type: boolean
+      object_types:
+        - ipam.prefix
+    - name: proxmox_exitnodes
+      label: Proxmox Exit Nodes
+      type: text
+      object_types:
+        - ipam.vrf
+    - name: proxmox_primary_exitnode
+      label: Proxmox Primary Exit Node
+      type: text
+      object_types:
+        - ipam.vrf
+    - name: proxmox_exitnodes_local_routing
+      label: Proxmox Exit Nodes Local Routing
+      type: boolean
+      object_types:
+        - ipam.vrf
+    - name: proxmox_underlay_protocol
+      label: Proxmox Underlay Protocol
+      type: text
+      object_types:
+        - ipam.prefix
+        - ipam.ipaddress
+    - name: proxmox_underlay_role
+      label: Proxmox Underlay Role
+      type: text
+      object_types:
+        - ipam.prefix
+        - ipam.ipaddress
+    - name: proxmox_node
+      label: Proxmox Node
+      type: text
+      object_types:
+        - ipam.ipaddress
+    - name: proxmox_vmid
+      label: Proxmox VMID
+      type: integer
+      object_types:
+        - ipam.ipaddress
+        - virtualization.virtualmachine
+    - name: proxmox_interface
+      label: Proxmox VM Interface
+      type: text
+      object_types:
+        - ipam.ipaddress
+    - name: proxmox_gateway
+      label: Proxmox Gateway
+      type: boolean
+      object_types:
+        - ipam.ipaddress
+    - name: proxmox_fabric_interfaces
+      label: Proxmox Fabric Interfaces
+      type: text
+      object_types:
+        - ipam.ipaddress
+- name: Create EVPN route targets for Proxmox SDN zones
+  netbox.netbox.netbox_route_target:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.route_target }}"
+      description: "Proxmox EVPN zone route target for {{ item.name }}"
+      tags: "{{ item.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+      custom_fields:
+        proxmox_sdn_id: "{{ item.proxmox_sdn_id | default(item.name | regex_replace('[^A-Za-z0-9]', '') | lower) }}"
+        proxmox_sdn_zone: "{{ item.name }}"
+        proxmox_sdn_zone_type: "{{ item.type }}"
+        proxmox_sdn_controller: "{{ item.controller }}"
+    state: present
+  loop: "{{ proxmox_sdn_zones }}"
+  when: item.route_target is defined
+- name: Create EVPN route targets for Proxmox VNets
+  netbox.netbox.netbox_route_target:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.1.route_target }}"
+      description: "Proxmox EVPN VNet route target for {{ item.1.name }}"
+      tags: "{{ item.1.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+      custom_fields: >-
+        {{
+          {
+            'proxmox_sdn_id': (item.1.proxmox_sdn_id | default(item.1.name | regex_replace('[^A-Za-z0-9]', '') | lower)),
+            'proxmox_sdn_zone': item.0.name,
+            'proxmox_sdn_zone_type': item.0.type,
+            'proxmox_sdn_controller': item.0.controller,
+            'proxmox_vnet': item.1.name,
+            'proxmox_vni': (item.1.vni | int)
+          }
+        }}
+    state: present
+  loop: "{{ proxmox_sdn_zones | subelements('vnets') }}"
+  when: item.1.route_target is defined
+- name: Create VRFs for Proxmox SDN zones
+  netbox.netbox.netbox_vrf:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.vrf }}"
+      description: "Proxmox SDN zone {{ item.name }} / {{ item.type }}"
+      import_targets:
+        - "{{ item.route_target }}"
+      export_targets:
+        - "{{ item.route_target }}"
+      tags: "{{ item.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+      custom_fields: >-
+        {{
+          {
+            'proxmox_sdn_id': (item.proxmox_sdn_id | default(item.name | regex_replace('[^A-Za-z0-9]', '') | lower)),
+            'proxmox_sdn_zone': item.name,
+            'proxmox_sdn_zone_type': item.type,
+            'proxmox_sdn_controller': item.controller,
+            'proxmox_vrf_vni': (item.vrf_vni | int),
+            'proxmox_exitnodes': (item.exitnodes | default([]) | join(',')),
+            'proxmox_primary_exitnode': (item.primary_exitnode | default('')),
+            'proxmox_exitnodes_local_routing': (item.exitnodes_local_routing | default(false) | bool)
+          }
+        }}
+    state: present
+  loop: "{{ proxmox_sdn_zones }}"
+- name: Create VLAN groups for Proxmox SDN zones
+  netbox.netbox.netbox_vlan_group:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.vlan_group }}"
+      slug: "{{ item.vlan_group }}"
+      scope_type: dcim.site
+      scope: "{{ netbox_site }}"
+    state: present
+  loop: "{{ proxmox_sdn_zones }}"
+- name: Create VLAN-backed VNets
+  netbox.netbox.netbox_vlan:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.1.name }}"
+      vid: "{{ item.1.vlan_id }}"
+      vlan_group: "{{ item.0.vlan_group }}"
+      status: active
+      description: "Local VLAN attachment for Proxmox VNet {{ item.1.name }} in zone {{ item.0.name }}"
+      tags: "{{ item.1.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+      custom_fields: >-
+        {{
+          {
+            'proxmox_sdn_zone': item.0.name,
+            'proxmox_sdn_zone_type': item.0.type,
+            'proxmox_sdn_controller': item.0.controller,
+            'proxmox_sdn_id': (item.1.proxmox_sdn_id | default(item.1.name | regex_replace('[^A-Za-z0-9]', '') | lower)),
+            'proxmox_vnet': item.1.name
+          }
+          | combine(
+            {'proxmox_vni': (item.1.vni | int)}
+            if item.1.vni is defined
+            else {}
+          )
+        }}
+    state: present
+  loop: "{{ proxmox_sdn_zones | subelements('vnets') }}"
+  when: item.1.vlan_id is defined
+  register: proxmox_vnet_vlan_results
+- name: Create L2VPN overlays for Proxmox VNets
+  netbox.netbox.netbox_l2vpn:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ item.1.name }}"
+      type: vxlan
+      identifier: "{{ item.1.vni | int }}"
+      import_targets:
+        - "{{ item.1.route_target }}"
+      export_targets:
+        - "{{ item.1.route_target }}"
+      description: "Proxmox EVPN/VXLAN VNet {{ item.1.name }} in zone {{ item.0.name }}"
+      tags: "{{ item.1.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+      custom_fields: >-
+        {{
+          {
+            'proxmox_sdn_zone': item.0.name,
+            'proxmox_sdn_zone_type': item.0.type,
+            'proxmox_sdn_controller': item.0.controller,
+            'proxmox_sdn_id': (item.1.proxmox_sdn_id | default(item.1.name | regex_replace('[^A-Za-z0-9]', '') | lower)),
+            'proxmox_vnet': item.1.name,
+            'proxmox_vni': (item.1.vni | int),
+            'proxmox_vrf_vni': (item.0.vrf_vni | int)
+          }
+        }}
+    state: present
+  loop: "{{ proxmox_sdn_zones | subelements('vnets') }}"
+  register: proxmox_vnet_l2vpn_results
+- name: Attach VLANs to L2VPN overlays when VLAN metadata exists
+  netbox.netbox.netbox_l2vpn_termination:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      l2vpn: "{{ proxmox_vnet_l2vpn_results.results[item].l2vpn.id }}"
+      assigned_object_type: ipam.vlan
+      assigned_object_id: "{{ proxmox_vnet_vlan_results.results[item].vlan.id }}"
+      tags: "{{ proxmox_vnet_vlan_results.results[item].item.1.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+    state: present
+  loop: "{{ range(0, proxmox_vnet_l2vpn_results.results | length) | list }}"
+  when:
+    - proxmox_vnet_vlan_results is defined
+    - proxmox_vnet_vlan_results.results[item].vlan.id is defined
+    - proxmox_vnet_l2vpn_results.results[item].l2vpn.id is defined
+- name: Create prefixes for Proxmox OpenFabric underlay
+  netbox.netbox.netbox_prefix:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      prefix: "{{ item.prefix }}"
+      scope_type: dcim.site
+      scope: "{{ netbox_site }}"
+      status: active
+      description: "{{ item.description }}"
+      tags: "{{ item.tags | default(['proxmox-sdn', 'proxmox-underlay', 'terraform-managed']) }}"
+      custom_fields:
+        proxmox_underlay_protocol: "{{ proxmox_sdn_underlay.protocol }}"
+        proxmox_underlay_role: "{{ item.role }}"
+    state: present
+  loop: "{{ proxmox_sdn_underlay.prefixes }}"
+- name: Create prefixes for Proxmox SDN subnets
+  netbox.netbox.netbox_prefix:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      prefix: "{{ item.1.subnet }}"
+      scope_type: dcim.site
+      scope: "{{ netbox_site }}"
+      vrf: "{{ item.0.vrf }}"
+      status: active
+      description: "Proxmox subnet for VNet {{ item.1.name }}"
+      tags: "{{ item.1.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+      custom_fields: >-
+        {{
+          {
+            'proxmox_sdn_zone': item.0.name,
+            'proxmox_sdn_zone_type': item.0.type,
+            'proxmox_sdn_controller': item.0.controller,
+            'proxmox_sdn_id': (item.1.proxmox_sdn_id | default(item.1.name | regex_replace('[^A-Za-z0-9]', '') | lower)),
+            'proxmox_vrf_vni': (item.0.vrf_vni | int),
+            'proxmox_vnet': item.1.name,
+            'proxmox_snat': (item.1.snat | default(false) | bool)
+          }
+          | combine(
+            {'proxmox_vni': (item.1.vni | int)}
+            if item.1.vni is defined
+            else {}
+          )
+        }}
+    state: present
+  loop: "{{ proxmox_sdn_zones | subelements('vnets') }}"
+- name: Create gateway IPs for Proxmox SDN subnets
+  netbox.netbox.netbox_ip_address:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      address: "{{ item.1.gateway }}"
+      vrf: "{{ item.0.vrf }}"
+      status: active
+      description: "Gateway for Proxmox VNet {{ item.1.name }}"
+      tags: "{{ item.1.tags | default(['proxmox-sdn', 'proxmox-evpn', 'terraform-managed']) }}"
+      custom_fields: >-
+        {{
+          {
+            'proxmox_sdn_zone': item.0.name,
+            'proxmox_sdn_zone_type': item.0.type,
+            'proxmox_sdn_controller': item.0.controller,
+            'proxmox_sdn_id': (item.1.proxmox_sdn_id | default(item.1.name | regex_replace('[^A-Za-z0-9]', '') | lower)),
+            'proxmox_vnet': item.1.name,
+            'proxmox_vni': (item.1.vni | int),
+            'proxmox_gateway': true
+          }
+        }}
+    state: present
+  loop: "{{ proxmox_sdn_zones | subelements('vnets') }}"
+  when: item.1.gateway is defined
+- name: Create loopback IPs for placeholder Proxmox nodes
+  netbox.netbox.netbox_ip_address:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      address: "{{ item.loopback }}"
+      status: active
+      description: "Loopback/router-id for placeholder Proxmox node {{ item.name }}"
+      tags: "{{ item.tags | default(['proxmox-sdn', 'proxmox-underlay', 'terraform-managed']) }}"
+      custom_fields:
+        proxmox_underlay_protocol: "{{ proxmox_sdn_underlay.protocol }}"
+        proxmox_underlay_role: loopback
+        proxmox_sdn_id: "{{ item.proxmox_sdn_id | default(item.name | regex_replace('[^A-Za-z0-9]', '') | lower) }}"
+        proxmox_node: "{{ item.name }}"
+        proxmox_fabric_interfaces: "{{ item.fabric_interfaces | default([]) | join(',') }}"
+    state: present
+  loop: "{{ proxmox_nodes }}"
+- name: Create fabric IPs for placeholder Proxmox nodes
+  netbox.netbox.netbox_ip_address:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      address: "{{ item.fabric_ip }}"
+      status: active
+      description: "OpenFabric node IP for placeholder Proxmox node {{ item.name }}"
+      tags: "{{ item.tags | default(['proxmox-sdn', 'proxmox-underlay', 'terraform-managed']) }}"
+      custom_fields:
+        proxmox_underlay_protocol: "{{ proxmox_sdn_underlay.protocol }}"
+        proxmox_underlay_role: fabric
+        proxmox_sdn_id: "{{ item.proxmox_sdn_id | default(item.name | regex_replace('[^A-Za-z0-9]', '') | lower) }}"
+        proxmox_node: "{{ item.name }}"
+        proxmox_fabric_interfaces: "{{ item.fabric_interfaces | default([]) | join(',') }}"
+    state: present
+  loop: "{{ proxmox_nodes }}"
+- name: Create Terraform discovery config context for Proxmox SDN
+  netbox.netbox.netbox_config_context:
+    netbox_url: "http://localhost:{{ netbox_http_port }}"
+    netbox_token: "{{ netbox_token }}"
+    validate_certs: "{{ netbox_validate_certs }}"
+    data:
+      name: "{{ proxmox_sdn_config_context.name }}"
+      description: "{{ proxmox_sdn_config_context.description }}"
+      weight: "{{ proxmox_sdn_config_context.weight }}"
+      is_active: true
+      data: "{{ proxmox_sdn_config_context.data | to_json }}"
+      sites:
+        - "{{ netbox_site }}"
+      clusters:
+        - "{{ netbox_cluster_name }}"
+      tags:
+        - proxmox-sdn
+        - terraform-managed
+    state: present

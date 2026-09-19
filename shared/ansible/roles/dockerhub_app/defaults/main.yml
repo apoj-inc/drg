@@ -1,0 +1,9 @@
+---
+dockerhub_compose_dir: /opt/dockerhub
+dockerhub_registry_image: "registry:{{ dockerhub_registry_image_tag | default('2') }}"
+dockerhub_listen_address: "0.0.0.0"
+dockerhub_http_port: 5000
+dockerhub_metrics_port: 5001
+dockerhub_proxy_username: ""
+dockerhub_proxy_password: ""
+dockerhub_healthcheck_url: "http://127.0.0.1:{{ dockerhub_http_port }}/v2/"

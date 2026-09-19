@@ -1,0 +1,24 @@
+---
+- name: Deploy Docker Hub cache
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('dockerhub', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    dockerhub_registry_image_tag: "{{ dockerhub.registry_image_tag }}"
+    dockerhub_listen_address: "{{ dockerhub.listen_address }}"
+    dockerhub_http_port: "{{ dockerhub.http_port }}"
+    dockerhub_metrics_port: "{{ dockerhub.metrics_port | default(5001) }}"
+    dockerhub_proxy_username: "{{ lookup('env', 'DOCKERHUB_PROXY_USERNAME') }}"
+    dockerhub_proxy_password: "{{ lookup('env', 'DOCKERHUB_PROXY_PASSWORD') }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - dockerhub_app
+    - monitoring_agent
+    - logging_agent

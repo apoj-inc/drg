@@ -1,0 +1,28 @@
+preview:powerdns-dns:
+  stage: powerdns_dns_preview
+  tags:
+    - rollout-target-a
+  extends: .ansible_configure
+{% set openbao_secret_job = "ansible" %}
+{% include "openbao-secrets.yml.j2" %}
+  environment:
+    name: "{{ deploy_environment }}/powerdns/dns"
+    action: prepare
+  variables:
+    SERVICE: powerdns
+    DEPLOY_ENVIRONMENT: "{{ deploy_environment }}"
+    ENVIRONMENT: "{{ deploy_environment }}"
+    ANSIBLE_ENVIRONMENT: "{{ deploy_environment }}"
+    NETBOX_API: "{{ job.netbox_api }}"
+    PLAYBOOK: services/powerdns/ansible/sync_dns.yml
+    ANSIBLE_LIMIT: powerdns-example-cluster-a-*
+    ANSIBLE_CHECK_FLAGS: "-e pdns_sync_apply=false"
+{% include "openbao-variables.yml.j2" %}
+  needs:
+{% for need in job.powerdns_dns_needs %}
+    - job: {{ need }}
+{% endfor %}
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

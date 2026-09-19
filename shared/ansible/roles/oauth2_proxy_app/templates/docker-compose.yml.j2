@@ -1,0 +1,50 @@
+services:
+  oauth2-proxy:
+    image: ${OAUTH2_PROXY_IMAGE}
+    container_name: oauth2-proxy
+    restart: unless-stopped
+    command:
+      - --provider=${OAUTH2_PROXY_PROVIDER}
+      - --http-address=${OAUTH2_PROXY_HTTP_ADDRESS}
+      - --metrics-address=${OAUTH2_PROXY_METRICS_ADDRESS}
+      - --oidc-issuer-url=${OAUTH2_PROXY_OIDC_ISSUER_URL}
+{% if oauth2_proxy_skip_oidc_discovery | bool %}
+      - --skip-oidc-discovery
+      - --login-url=${OAUTH2_PROXY_KEYCLOAK_LOGIN_URL}/protocol/openid-connect/auth
+      - --redeem-url=${OAUTH2_PROXY_KEYCLOAK_DIRECT_URL}/protocol/openid-connect/token
+      - --oidc-jwks-url=${OAUTH2_PROXY_KEYCLOAK_DIRECT_URL}/protocol/openid-connect/certs
+{% endif %}
+      - --client-id=${OAUTH2_PROXY_CLIENT_ID}
+      - --client-secret=${OAUTH2_PROXY_CLIENT_SECRET}
+      - --cookie-secret=${OAUTH2_PROXY_COOKIE_SECRET}
+      - --cookie-domain=${OAUTH2_PROXY_COOKIE_DOMAINS}
+      - --cookie-name=${OAUTH2_PROXY_COOKIE_NAME}
+      - --cookie-expire=${OAUTH2_PROXY_COOKIE_EXPIRE}
+      - --cookie-refresh=${OAUTH2_PROXY_COOKIE_REFRESH}
+      - --cookie-samesite=${OAUTH2_PROXY_COOKIE_SAMESITE}
+      - --redirect-url=${OAUTH2_PROXY_REDIRECT_URL}
+      - --upstream=${OAUTH2_PROXY_UPSTREAMS}
+      - --email-domain=${OAUTH2_PROXY_EMAIL_DOMAINS}
+{% if oauth2_proxy_whitelist_domains | length > 0 %}
+      - --whitelist-domain=${OAUTH2_PROXY_WHITELIST_DOMAINS}
+{% endif %}
+      - --insecure-oidc-allow-unverified-email=${OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL}
+      - --scope=${OAUTH2_PROXY_SCOPE}
+      - --trusted-proxy-ip=${OAUTH2_PROXY_TRUSTED_PROXY_IPS}
+      - --set-xauthrequest=${OAUTH2_PROXY_SET_XAUTHREQUEST}
+      - --pass-authorization-header=${OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER}
+      - --pass-access-token=${OAUTH2_PROXY_PASS_ACCESS_TOKEN}
+      - --set-authorization-header=${OAUTH2_PROXY_SET_AUTHORIZATION_HEADER}
+      - --reverse-proxy=${OAUTH2_PROXY_REVERSE_PROXY}
+      - --skip-provider-button
+      - --session-store-type=cookie
+      - --cookie-secure=true
+      - --cookie-httponly=true
+    ports:
+      - "${OAUTH2_PROXY_LISTEN_ADDRESS}:${OAUTH2_PROXY_HTTP_PORT}:4180"
+      - "${OAUTH2_PROXY_LISTEN_ADDRESS}:${OAUTH2_PROXY_METRICS_PORT}:44180"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:4180/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

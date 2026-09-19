@@ -1,0 +1,34 @@
+---
+openbao_compose_dir: /opt/openbao
+openbao_image_tag: "2.6.0"
+openbao_image: "openbao/openbao:{{ openbao_image_tag }}"
+openbao_listen_address: "0.0.0.0"
+openbao_http_port: 8200
+openbao_mtls_port: 8202
+openbao_mtls_hostname: ""
+openbao_api_addr: "https://openbao.example.test"
+openbao_cluster_addr: "http://127.0.0.1:8201"
+openbao_healthcheck_url: "http://127.0.0.1:{{ openbao_http_port }}/v1/sys/health"
+openbao_postgresql_host: postgresql.example.test
+openbao_postgresql_port: 5432
+openbao_postgresql_database: "openbao"
+openbao_postgresql_username: "openbao"
+openbao_postgresql_password: ""
+openbao_postgresql_sslmode: "disable"
+openbao_postgresql_table: "openbao_kv_store"
+openbao_postgresql_ha_enabled: true
+openbao_root_token: ""
+openbao_config_token: ""
+openbao_config_bootstrap: false
+openbao_config_directory: ""
+openbao_config_apply: true
+# Auth definitions that depend on another service being online can be
+# reconciled from that service's playbook instead of during OpenBao bootstrap.
+openbao_declarative_auth_exclude_files: []
+openbao_tls_dir: /opt/openbao/tls
+openbao_tls_ca_file: /opt/openbao/tls/freeipa-ca.crt
+openbao_tls_cert_file: /opt/openbao/tls/server.crt
+openbao_tls_key_file: /opt/openbao/tls/server.key
+openbao_tls_cert_request_principal: "host/{{ openbao_mtls_hostname }}"
+openbao_tls_group: openbao-mtls
+openbao_tls_group_id: 2000

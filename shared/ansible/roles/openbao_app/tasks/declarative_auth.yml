@@ -1,0 +1,87 @@
+---
+- name: Enable declared OpenBao auth method
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "sys/auth/{{ openbao_auth_method.mount }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      type: "{{ openbao_auth_method.type }}"
+      description: "{{ openbao_auth_method.description | default(omit) }}"
+  vars:
+    openbao_auth_method: "{{ openbao_auth_definition }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - openbao_auth_definition.mount is defined
+    - (openbao_auth_definition.mount ~ '/') not in (openbao_declarative_auth_mounts.data.data | default({}))
+  no_log: true
+
+- name: Configure declared single OpenBao auth method
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "auth/{{ openbao_auth_definition.mount }}/config"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data: "{{ openbao_auth_definition.config | default({}) }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when:
+    - openbao_auth_definition.mount is defined
+    - openbao_auth_definition.config is defined
+  no_log: true
+
+- name: Configure FreeIPA CA certificate auth role
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "auth/{{ openbao_auth_definition.mount }}/certs/{{ openbao_cert_role.name }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data:
+      certificate: "{{ lookup('ansible.builtin.file', openbao_config_directory ~ '/' ~ openbao_auth_definition.ca_cert_file) }}"
+      display_name: "{{ openbao_cert_role.display_name }}"
+      policies: "{{ openbao_cert_role.policies }}"
+      ttl: "{{ openbao_cert_role.token_ttl }}"
+      max_ttl: "{{ openbao_cert_role.token_max_ttl }}"
+      ocsp_enabled: "{{ openbao_cert_role.ocsp_enabled }}"
+      ocsp_fail_open: "{{ openbao_cert_role.ocsp_fail_open }}"
+      allowed_dns_sans: "{{ openbao_cert_role.allowed_dns_sans | default(omit) }}"
+      crl_name: "{{ openbao_cert_role.crl_name | default(omit) }}"
+  loop: "{{ openbao_auth_definition.roles | default([]) }}"
+  loop_control:
+    loop_var: openbao_cert_role
+    label: "{{ openbao_cert_role.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: (openbao_auth_definition.type | default('')) == 'cert'
+  no_log: true
+
+- name: Configure declared JWT auth roles
+  community.hashi_vault.vault_write:
+    url: "{{ openbao_api_addr }}"
+    path: "auth/{{ openbao_auth_definition.mount }}/role/{{ openbao_auth_role.name }}"
+    token: "{{ openbao_config_token }}"
+    validate_certs: true
+    data: "{{ openbao_auth_role | dict2items | rejectattr('key', 'equalto', 'name') | items2dict }}"
+  loop: "{{ openbao_auth_definition.roles | default([]) }}"
+  loop_control:
+    loop_var: openbao_auth_role
+    label: "{{ openbao_auth_role.name }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: (openbao_auth_definition.type | default('')) == 'jwt'
+  no_log: true
+
+- name: Configure declared OIDC providers
+  ansible.builtin.include_tasks: declarative_oidc_provider.yml
+  vars:
+    openbao_oidc_definition: "{{ openbao_oidc_provider }}"
+  loop: "{{ openbao_auth_definition.providers | default([]) }}"
+  loop_control:
+    loop_var: openbao_oidc_provider
+    label: "{{ openbao_oidc_provider.mount }}"
+  when: openbao_auth_definition.providers is defined

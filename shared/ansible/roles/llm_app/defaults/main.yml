@@ -1,0 +1,46 @@
+---
+llm_user: llm
+llm_group: llm
+llm_home: /opt/llm
+llm_venv: /opt/llm/venvs/vllm
+llm_data_root: /srv/llm
+llm_config_dir: /etc/llm
+llm_environment_file: /etc/llm/vllm-main.env
+llm_uv_version: "0.8.15"
+llm_uv_http_timeout: "600"
+llm_uv_http_retries: "5"
+llm_uv_concurrent_downloads: "4"
+llm_uv_installer_url: "https://astral.sh/uv/{{ llm_uv_version }}/install.sh"
+llm_uv_installer_path: "/var/cache/uv-installer-{{ llm_uv_version }}.sh"
+llm_cuda_keyring_url: https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb
+llm_cuda_keyring_path: /var/cache/cuda-keyring_1.1-1_all.deb
+llm_cuda_toolkit_package: cuda-toolkit-13-1
+llm_cuda_home: /usr/local/cuda-13.1
+llm_nvidia_driver_branch: ""
+llm_vllm_version: "0.26.0"
+llm_emergency_pip: false
+llm_emergency_model_download: false
+llm_pip_http_timeout: "600"
+llm_pip_retries: "5"
+llm_emergency_wheelhouse: "{{ llm_data_root }}/wheels"
+llm_emergency_pip_report: "{{ llm_data_root }}/vllm-pip-report.json"
+llm_emergency_model_dir: "{{ llm_data_root }}/models/qwen3.8-27b-gptq-int4"
+llm_emergency_model_manifest: "{{ llm_data_root }}/qwen3.8-27b-gptq-int4-manifest.json"
+llm_emergency_model_complete: "{{ llm_emergency_model_dir }}/.snapshot-complete"
+llm_hf_http_timeout: "900"
+llm_model_id: sokada4/Qwen3.8-27B-GPTQ-Int4
+llm_served_model_name: qwen3.8-27b-gptq
+llm_expected_gpu_count: 8
+llm_expected_gpu_product_pattern: NVIDIA GeForce RTX 3080
+llm_minimum_vram_mib: 9500
+llm_model_gpu_uuids: []
+llm_pipeline_parallel_size: 2
+llm_tensor_parallel_size: 2
+llm_numa_node: 0
+llm_max_model_len: 131072
+llm_max_num_seqs: 1
+llm_max_num_batched_tokens: 4096
+llm_gpu_memory_utilization: 0.92
+llm_api_host: 0.0.0.0
+llm_api_port: 8000
+llm_external_https_proxy: "{{ external_download_proxy_url | default(platform_config.egress_proxy.https | default(''), true) }}"

@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: docker_lxc
+  author: repository
+  description: Install Docker Engine and Compose plugin inside Debian-based LXC containers
+  license: internal
+  min_ansible_version: "2.14"
+
+dependencies:
+  - role: debian_mirrors

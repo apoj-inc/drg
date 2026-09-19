@@ -1,0 +1,9 @@
+---
+galaxy_info:
+  role_name: netbox_sdn_bootstrap
+  author: repository
+  description: Bootstrap Proxmox SDN seed objects in NetBox
+  license: internal
+  min_ansible_version: "2.14"
+
+dependencies: []

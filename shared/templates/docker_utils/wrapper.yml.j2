@@ -1,0 +1,14 @@
+---
+{% if include_template %}
+include:
+  - local: {{ include_template }}
+
+{% endif %}
+stages:
+{% for stage in stages %}
+  - {{ stage }}
+{% endfor %}
+
+{% for job in jobs %}
+{% include job.template %}
+{% endfor %}

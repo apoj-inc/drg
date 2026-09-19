@@ -1,0 +1,33 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+module "image" {
+  for_each = {
+{% for name, image in config.images.items() %}
+    {{ name | tf_string }} = {
+      source_url       = {{ image.source_url | tf_string }}
+      checksum         = {{ image.checksum | tf_string }}
+      checksum_algo    = {{ image.checksum_algo | default('sha256') | tf_string }}
+      disk_format      = {{ image.disk_format | default('qcow2') | tf_string }}
+      container_format = {{ image.container_format | default('bare') | tf_string }}
+      visibility       = {{ image.visibility | default('private') | tf_string }}
+      min_disk_gb      = {{ image.min_disk_gb | default(0) }}
+      min_ram_mb       = {{ image.min_ram_mb | default(0) }}
+      properties       = {{ image.properties | default({}) | tf_value }}
+    }
+{% endfor %}
+  }
+
+  source = "../../../../../../shared/terraform/openstack_image"
+
+  name                       = each.key
+  image_source_url           = each.value.source_url
+  image_source_checksum      = each.value.checksum
+  image_source_checksum_algo = each.value.checksum_algo
+  disk_format                = each.value.disk_format
+  container_format           = each.value.container_format
+  visibility                 = each.value.visibility
+  min_disk_gb                = each.value.min_disk_gb
+  min_ram_mb                 = each.value.min_ram_mb
+  properties                 = each.value.properties
+}

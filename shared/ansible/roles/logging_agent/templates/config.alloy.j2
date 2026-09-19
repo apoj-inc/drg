@@ -1,0 +1,37 @@
+loki.write "central" {
+  endpoint {
+    url = "{{ logging_agent_loki_url }}"
+  }
+
+  external_labels = {
+    environment = "{{ logging_agent_environment }}",
+    instance    = "{{ inventory_hostname }}",
+    service     = "{{ logging_agent_service }}",
+{% if logging_agent_cluster | length > 0 %}
+    cluster     = "{{ logging_agent_cluster }}",
+{% endif %}
+{% if logging_agent_contour | length > 0 %}
+    contour     = "{{ logging_agent_contour }}",
+{% endif %}
+  }
+}
+
+{% if logging_agent_collect_journal_runtime %}
+import.file "systemd_logging" {
+  filename = "{{ logging_agent_systemd_module_path }}"
+}
+
+systemd_logging.journal "systemd" {
+  write_to = [loki.write.central.receiver]
+}
+{% endif %}
+
+{% if logging_agent_collect_docker_runtime %}
+import.file "docker_logging" {
+  filename = "{{ logging_agent_docker_module_path }}"
+}
+
+docker_logging.containers "containers" {
+  write_to = [loki.write.central.receiver]
+}
+{% endif %}

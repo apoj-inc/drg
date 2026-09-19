@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: node_exporter
+  author: drg
+  description: Installs and configures Prometheus node exporter.
+  min_ansible_version: '2.14'
+dependencies:
+  - role: debian_mirrors

@@ -1,0 +1,29 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - python3-venv
+    state: present
+    update_cache: true
+
+- name: Create Python venv for NetBox Ansible modules
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/ansible-netbox-venv
+    creates: /opt/ansible-netbox-venv/bin/python
+
+- name: Install current pynetbox with v2 token support
+  ansible.builtin.command: /opt/ansible-netbox-venv/bin/pip install --upgrade "pynetbox>=7.6.0"
+  changed_when: false
+
+- name: Install Docker
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure NetBox Compose directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ netbox_compose_dir }}"
+    - "{{ netbox_compose_dir }}/env"

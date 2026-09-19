@@ -1,0 +1,110 @@
+---
+- name: Install Grafana prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Validate Grafana monitoring secrets
+  ansible.builtin.assert:
+    that:
+      - grafana_oidc_client_secret | length > 0
+      - grafana_admin_password | length > 0
+      - grafana_proxmox_api_token | length > 0
+      - grafana_postgresql_password | length > 0
+      - grafana_forgejo_metrics_token | length > 0
+      - grafana_telegram_bot_token | length > 0
+      - grafana_telegram_chat_id | length > 0
+      - grafana_redis_exporter_password | length > 0
+    fail_msg: >-
+      Grafana OIDC, break-glass admin, Proxmox, PostgreSQL exporter and
+      Telegram secrets must be present in kv/services/grafana; Forgejo's
+      metrics token must be readable from kv/services/forgejo.
+  when: grafana_install_method == "docker"
+
+- name: Configure Grafana
+  ansible.builtin.import_tasks: configure.yml
+  when: grafana_install_method != "docker"
+  tags:
+    - configure
+
+- name: Run Grafana Compose lifecycle
+  ansible.builtin.import_role:
+    name: compose_app
+  vars:
+    compose_app_name: grafana
+    compose_app_root: "{{ grafana_compose_dir }}"
+    compose_app_healthcheck_url: "{{ grafana_healthcheck_url }}"
+    compose_app_healthcheck_retries: 30
+    compose_app_healthcheck_delay: 2
+  when: grafana_install_method == "docker"
+
+- name: Verify every Grafana monitoring component is running
+  ansible.builtin.command: docker compose ps --status running --services
+  args:
+    chdir: "{{ grafana_compose_dir }}"
+  register: grafana_running_components
+  changed_when: false
+  when: grafana_install_method == "docker"
+
+- name: Define expected Grafana monitoring components
+  ansible.builtin.set_fact:
+    grafana_expected_components:
+      - grafana
+      - prometheus
+      - loki
+      - blackbox-exporter
+      - pve-exporter
+      - postgres-exporter
+      - redis-exporter
+  when: grafana_install_method == "docker"
+
+- name: Assert Grafana monitoring stack is complete
+  ansible.builtin.assert:
+    that:
+      - >-
+        grafana_expected_components |
+        difference(grafana_running_components.stdout_lines) | length == 0
+    fail_msg: >-
+      Grafana monitoring stack is incomplete. Missing running components: {{
+      grafana_expected_components |
+      difference(grafana_running_components.stdout_lines) | join(', ') }}.
+  when: grafana_install_method == "docker"
+
+- name: Mark healthy Grafana replica as eligible for canonical DNS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../../../shared/scripts/reconcile_service_dns.py"
+      - mark-eligible
+      - --config
+      - "{{ playbook_dir }}/../config.yaml"
+      - --hostname
+      - "{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  environment:
+    NETBOX_API: "{{ lookup('env', 'NETBOX_API') }}"
+    NETBOX_TOKEN: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+    NETBOX_VALIDATE_CERTS: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') }}"
+  when:
+    - grafana_install_method == "docker"
+    - grafana_healthcheck_url | length > 0
+
+- name: Restart Grafana explicitly
+  ansible.builtin.import_tasks: restart.yml
+  when: grafana_install_method != "docker"
+  tags:
+    - never
+    - restart
+
+- name: Restart Grafana container explicitly
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: restart.yml
+  vars:
+    compose_app_root: "{{ grafana_compose_dir }}"
+  when: grafana_install_method == "docker"
+  tags:
+    - never
+    - restart

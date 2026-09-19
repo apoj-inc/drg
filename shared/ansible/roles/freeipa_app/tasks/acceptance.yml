@@ -1,0 +1,35 @@
+---
+- name: Validate external FreeIPA node DNS records
+  ansible.builtin.command:
+    argv:
+      - getent
+      - ahostsv4
+      - "{{ item }}"
+  loop:
+    - freeipa-node-a.example.test
+    - freeipa-node-b.example.test
+  register: freeipa_node_dns
+  changed_when: false
+  failed_when: freeipa_node_dns.rc != 0
+  when: freeipa_external_dns_validation | bool
+
+- name: Validate external FreeIPA SRV/TXT records
+  ansible.builtin.command:
+    argv:
+      - dig
+      - +short
+      - "{{ item.record_type }}"
+      - "{{ item.name }}"
+  loop:
+    - {record_type: SRV, name: _ldap._tcp.example.test}
+    - {record_type: SRV, name: _kerberos._tcp.example.test}
+    - {record_type: SRV, name: _kerberos._udp.example.test}
+    - {record_type: SRV, name: _kerberos-master._tcp.example.test}
+    - {record_type: SRV, name: _kerberos-master._udp.example.test}
+    - {record_type: SRV, name: _kpasswd._tcp.example.test}
+    - {record_type: SRV, name: _kpasswd._udp.example.test}
+    - {record_type: TXT, name: _kerberos.example.test}
+  register: freeipa_service_dns
+  changed_when: false
+  failed_when: freeipa_service_dns.rc != 0 or freeipa_service_dns.stdout | trim | length == 0
+  when: freeipa_external_dns_validation | bool

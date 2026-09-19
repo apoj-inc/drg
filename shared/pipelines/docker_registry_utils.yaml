@@ -1,0 +1,26 @@
+---
+stages:
+  - generate
+  - include
+
+generate-pipeline:
+  stage: generate
+  script:
+    - python3 -c "import jinja2, yaml"
+    - python3 shared/scripts/docker/generate_docker_utils.py > generated-docker.yml
+  artifacts:
+    paths:
+      - generated-docker.yml
+    expire_in: 1 day
+
+docker-pipeline:
+  stage: include
+  allow_failure: true
+  trigger:
+    include:
+      - artifact: generated-docker.yml
+        job: generate-pipeline
+    strategy: depend
+    forward:
+      pipeline_variables: true
+      yaml_variables: true

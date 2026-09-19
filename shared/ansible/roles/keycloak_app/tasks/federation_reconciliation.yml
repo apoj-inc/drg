@@ -1,0 +1,47 @@
+---
+- name: Reconcile unmanaged Keycloak user federations
+  module_defaults:
+    group/middleware_automation.keycloak.keycloak:
+      auth_keycloak_url: "{{ keycloak_admin_api_url }}"
+      auth_realm: master
+      auth_username: "{{ keycloak_admin_username }}"
+      auth_password: "{{ keycloak_admin_password }}"
+      validate_certs: false
+  block:
+    - name: Read application-realm user federations
+      middleware_automation.keycloak.keycloak_component_info:
+        realm: "{{ keycloak_realm }}"
+        provider_type: org.keycloak.storage.UserStorageProvider
+      register: keycloak_application_federations
+      no_log: true
+
+    - name: Remove unmanaged application-realm user federations
+      middleware_automation.keycloak.keycloak_user_federation:
+        realm: "{{ keycloak_realm }}"
+        name: "{{ item.name }}"
+        state: absent
+      loop: "{{ keycloak_application_federations.components | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - keycloak_freeipa_remove_unmanaged_federations | bool
+        - item.name not in keycloak_freeipa_managed_application_federation_names
+
+    - name: Read master-realm user federations
+      middleware_automation.keycloak.keycloak_component_info:
+        realm: master
+        provider_type: org.keycloak.storage.UserStorageProvider
+      register: keycloak_master_federations
+      no_log: true
+
+    - name: Remove unmanaged master-realm user federations
+      middleware_automation.keycloak.keycloak_user_federation:
+        realm: master
+        name: "{{ item.name }}"
+        state: absent
+      loop: "{{ keycloak_master_federations.components | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - keycloak_freeipa_remove_unmanaged_federations | bool
+        - item.name not in keycloak_freeipa_managed_master_federation_names

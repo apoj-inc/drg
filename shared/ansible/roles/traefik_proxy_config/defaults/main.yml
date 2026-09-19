@@ -1,0 +1,11 @@
+---
+traefik_proxy_enabled: false
+traefik_proxy_host: traefik
+traefik_proxy_hosts: "{{ groups['tags_traefik'] | default([traefik_proxy_host]) }}"
+traefik_route_template_host: "{{ traefik_proxy_hosts | first }}"
+traefik_proxy_config_dir: /opt/traefik/config
+traefik_proxy_compose_dir: /opt/traefik
+traefik_proxy_route_manifest: "{{ traefik_proxy_compose_dir }}/.managed-route-files.yml"
+traefik_route_file: "{{ playbook_dir }}/../traefik.yml"
+traefik_proxy_config_name: "{{ inventory_hostname }}"
+traefik_proxy_root_ca_sources: []

@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Exercise 64K, 96K and 128K prompts against the local chat endpoint."""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.request
+
+
+def load_env(path: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    with open(path, encoding="utf-8") as stream:
+        for raw in stream:
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, value = line.split("=", 1)
+                result[key] = value
+    return result
+
+
+def post(url: str, payload: dict, timeout: int = 7200) -> dict:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def main() -> None:
+    env = load_env(os.environ.get("LLM_ENV_FILE", "/etc/llm/vllm-main.env"))
+    base = os.environ.get("LLM_BASE_URL", f"http://127.0.0.1:{env['VLLM_PORT']}")
+    model = env["SERVED_MODEL_NAME"]
+    results = []
+    # " x" is normally one token for this tokenizer. API usage is authoritative;
+    # leave room for the chat template and require it to land near each target.
+    for target in (65536, 98304, 131072):
+        prompt = "Repeat OK once after reading this filler:" + " x" * (target - 256)
+        started = time.monotonic()
+        response = post(
+            f"{base}/v1/chat/completions",
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 1,
+                "temperature": 0,
+            },
+        )
+        elapsed = time.monotonic() - started
+        prompt_tokens = int(response.get("usage", {}).get("prompt_tokens", 0))
+        if not target - 1024 <= prompt_tokens <= target:
+            raise SystemExit(
+                f"target {target}: unexpected prompt token count {prompt_tokens}; "
+                "adjust filler for the checkpoint tokenizer"
+            )
+        results.append({"target": target, "prompt_tokens": prompt_tokens, "seconds": round(elapsed, 3)})
+        print(json.dumps(results[-1]))
+    output = os.environ.get("LLM_CONTEXT_RESULT", "/srv/llm/logs/context-validation.json")
+    with open(output, "w", encoding="utf-8") as stream:
+        json.dump(results, stream, indent=2)
+        stream.write("\n")
+
+
+if __name__ == "__main__":
+    main()

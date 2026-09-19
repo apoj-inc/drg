@@ -1,0 +1,41 @@
+declare "containers" {
+  argument "write_to" {
+    optional = false
+  }
+
+  discovery.docker "containers" {
+    host = "unix:///var/run/docker.sock"
+  }
+
+  discovery.relabel "containers" {
+    targets = discovery.docker.containers.targets
+
+    rule {
+      source_labels = ["__meta_docker_container_name"]
+      regex         = "/(.*)"
+      replacement   = "$1"
+      target_label  = "container"
+    }
+
+    rule {
+      source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+      target_label  = "compose_service"
+    }
+
+    rule {
+      source_labels = ["__meta_docker_container_image"]
+      target_label  = "image"
+    }
+  }
+
+  loki.source.docker "containers" {
+    host       = "unix:///var/run/docker.sock"
+    targets    = discovery.relabel.containers.output
+    forward_to = argument.write_to.value
+
+    labels = {
+      source = "docker",
+      host   = "{{ inventory_hostname }}",
+    }
+  }
+}

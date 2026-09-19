@@ -1,0 +1,279 @@
+---
+- name: Validate Woodpecker credentials
+  ansible.builtin.assert:
+    that:
+      - woodpecker_forgejo_secret | length > 0
+      - woodpecker_grpc_secret | length > 0
+      - postgresql_woodpecker_password | length > 0
+    fail_msg: Woodpecker Forgejo, gRPC, and PostgreSQL secrets must be provided through OpenBao.
+  no_log: true
+
+- name: Install Woodpecker host prerequisites
+  ansible.builtin.apt:
+    name:
+      - ansible
+      - ca-certificates
+      - curl
+      - certmonger
+      - freeipa-client
+      - git
+      - golang-go
+      - openssh-client
+      - python3
+      - python3-jinja2
+      - python3-hvac
+      - python3-pynetbox
+      - python3-requests
+      - python3-requests-kerberos
+      - python3-tz
+      - python3-yaml
+      - yamllint
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Ensure Woodpecker OpenBao certificate directory exists
+  ansible.builtin.file:
+    path: "{{ woodpecker_openbao_cert_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install FreeIPA CA used to verify OpenBao
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../freeipa/pki/trust/freeipa-ca.crt"
+    dest: "{{ woodpecker_openbao_ca_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable certmonger for automatic certificate renewal
+  ansible.builtin.service:
+    name: certmonger
+    state: started
+    enabled: true
+
+- name: Verify the FreeIPA host keytab is available
+  ansible.builtin.command:
+    argv:
+      - klist
+      - -k
+      - /etc/krb5.keytab
+  changed_when: false
+
+- name: Check existing Woodpecker OpenBao client certificate
+  ansible.builtin.stat:
+    path: "{{ woodpecker_openbao_cert_file }}"
+  register: woodpecker_openbao_cert
+
+- name: Check existing certmonger requests
+  ansible.builtin.command:
+    argv:
+      - ipa-getcert
+      - list
+  register: woodpecker_certmonger_requests
+  changed_when: false
+  failed_when: false
+  when: not woodpecker_openbao_cert.stat.exists
+
+- name: Request a renewable FreeIPA certificate for OpenBao authentication
+  ansible.builtin.command:
+    argv:
+      - ipa-getcert
+      - request
+      - -K
+      - "{{ woodpecker_openbao_cert_request_principal }}"
+      - -k
+      - "{{ woodpecker_openbao_key_file }}"
+      - -f
+      - "{{ woodpecker_openbao_cert_file }}"
+      - -N
+      - "CN={{ woodpecker_openbao_cert_hostname }}"
+      - -D
+      - "{{ woodpecker_openbao_cert_hostname }}"
+  when:
+    - not woodpecker_openbao_cert.stat.exists
+    - woodpecker_certmonger_requests.rc | default(1) != 0 or
+      woodpecker_openbao_cert_file not in woodpecker_certmonger_requests.stdout
+  register: woodpecker_openbao_cert_request
+
+- name: Wait for Woodpecker OpenBao certificate issuance
+  ansible.builtin.stat:
+    path: "{{ woodpecker_openbao_cert_file }}"
+  register: woodpecker_openbao_cert
+  until: woodpecker_openbao_cert.stat.exists
+  retries: 12
+  delay: 5
+  ignore_errors: true
+
+- name: Read Woodpecker OpenBao certmonger status after certificate wait
+  ansible.builtin.command:
+    argv:
+      - ipa-getcert
+      - list
+  register: woodpecker_certmonger_status
+  changed_when: false
+  when: not woodpecker_openbao_cert.stat.exists
+
+- name: Report Woodpecker OpenBao certificate issuance failure
+  ansible.builtin.fail:
+    msg: >-
+      Woodpecker OpenBao client certificate was not issued at
+      {{ woodpecker_openbao_cert_file }}. certmonger status:
+      {{ woodpecker_certmonger_status.stdout | default('unavailable') }}
+  when: not woodpecker_openbao_cert.stat.exists
+
+- name: Set Woodpecker OpenBao client certificate permissions
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ woodpecker_openbao_cert_file }}", mode: "0644"}
+    - {path: "{{ woodpecker_openbao_key_file }}", mode: "0600"}
+
+- name: Install Docker for the Woodpecker server container
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure Woodpecker directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - {path: "{{ woodpecker_compose_dir }}", mode: "0755"}
+    - {path: "{{ woodpecker_data_dir }}", owner: "1000", group: "1000", mode: "0750"}
+    - {path: "{{ woodpecker_config_extension_dir }}", mode: "0755"}
+    - {path: "{{ woodpecker_config_extension_public_key_file | dirname }}", mode: "0755"}
+
+- name: Check for a legacy Woodpecker SQLite database
+  ansible.builtin.stat:
+    path: "{{ woodpecker_data_dir }}/woodpecker.sqlite"
+  register: woodpecker_legacy_sqlite
+
+- name: Require an explicit SQLite migration before enabling PostgreSQL
+  ansible.builtin.assert:
+    that:
+      - not woodpecker_legacy_sqlite.stat.exists
+    fail_msg: >-
+      A legacy Woodpecker SQLite database exists at
+      {{ woodpecker_data_dir }}/woodpecker.sqlite. Export/migrate it to the
+      PostgreSQL woodpecker database, verify the data, and move the SQLite file
+      aside before enabling the HA servers.
+
+- name: Remove the former co-located Woodpecker agent
+  ansible.builtin.command: systemctl disable --now woodpecker-agent
+  failed_when: false
+  changed_when: false
+
+- name: Remove former co-located Woodpecker agent files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/woodpecker-agent.service
+    - /etc/woodpecker/agent.env
+
+- name: Render Woodpecker server environment
+  ansible.builtin.template:
+    src: server.env.j2
+    dest: "{{ woodpecker_compose_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: Restart Woodpecker server
+
+- name: Render Woodpecker server Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ woodpecker_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Woodpecker server
+
+- name: Install Woodpecker configuration extension sources
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ woodpecker_config_extension_dir }}/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - {src: "{{ playbook_dir }}/../config_extension/main.go", dest: main.go}
+    - {src: "{{ playbook_dir }}/../config_extension/go.mod", dest: go.mod}
+    - {src: "{{ playbook_dir }}/../config_extension/go.sum", dest: go.sum}
+    - {src: "{{ playbook_dir }}/../../../shared/scripts/generate_woodpecker.py", dest: generate_woodpecker.py}
+
+- name: Build Woodpecker configuration extension
+  ansible.builtin.command:
+    cmd: go build -mod=readonly -o "{{ woodpecker_config_extension_binary }}" .
+    chdir: "{{ woodpecker_config_extension_dir }}"
+
+- name: Install Woodpecker configuration extension systemd unit
+  ansible.builtin.template:
+    src: woodpecker-config-extension.service.j2
+    dest: /etc/systemd/system/woodpecker-config-extension.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start Woodpecker server directly on the bootstrap node
+  community.docker.docker_compose_v2:
+    project_src: "{{ woodpecker_compose_dir }}"
+    state: present
+    pull: missing
+  when: not (woodpecker_managed_by_ha | default(false) | bool)
+
+- name: Flush Woodpecker server changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Read Woodpecker request-signing public key
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ woodpecker_http_port }}/api/signature/public-key"
+    return_content: true
+    status_code: 200
+  register: woodpecker_extension_public_key
+  until: woodpecker_extension_public_key.status == 200
+  retries: 30
+  delay: 5
+  when: not (woodpecker_managed_by_ha | default(false) | bool)
+
+- name: Install Woodpecker request-signing public key
+  ansible.builtin.copy:
+    dest: "{{ woodpecker_config_extension_public_key_file }}"
+    content: "{{ woodpecker_extension_public_key.content }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not (woodpecker_managed_by_ha | default(false) | bool)
+- name: Enable and start Woodpecker configuration extension
+  ansible.builtin.systemd:
+    name: woodpecker-config-extension
+    enabled: true
+    state: restarted
+    daemon_reload: true
+  when: not (woodpecker_managed_by_ha | default(false) | bool)
+
+- name: Verify Woodpecker configuration extension is healthy
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:9010/healthz"
+    status_code: 200
+  when: not (woodpecker_managed_by_ha | default(false) | bool)
+
+- name: Wait for Woodpecker server
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ woodpecker_http_port }}/"
+    status_code: [200, 302]
+  register: woodpecker_health
+  until: woodpecker_health.status in [200, 302]
+  retries: 30
+  delay: 5
+  when: not (woodpecker_managed_by_ha | default(false) | bool)

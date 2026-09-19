@@ -1,0 +1,92 @@
+---
+service:
+  name: gitlab
+  topology: replicated
+  description: GitLab application service.
+  tags: [opentofu, gitlab, traefik-managed-route]
+
+startup:
+  order: 140
+
+rollout:
+  by_contour: true
+
+logging:
+  journal_units:
+    - gitlab-runsvdir
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1001
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+    keyctl: false
+    fuse: false
+
+compute:
+  cpu_cores: 4
+  memory_mb: 10240
+  swap_mb: 4096
+  disk_gb: 30
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: app
+      dns_name_pattern: gitlab-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: git.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+gitlab:
+  external_url: https://git.example.test
+  shell_ssh_port: 2222
+  postgresql:
+    host: postgresql.example.test
+    port: 5432
+    database: gitlabhq_production
+    username: gitlab
+  traefik_trusted_proxy: 198.51.100.0/24
+  authentik:
+    issuer_url: https://auth.example.test/application/o/gitlab/
+    client_id: gitlab
+  keycloak:
+    issuer_url: https://keycloak.example.test/realms/drg
+    client_id: gitlab
+  oidc:
+    auto_link_user: true
+    allow_single_sign_on: true
+    block_auto_created_users: false
+
+secrets:
+  path: kv/services/gitlab
+  fields:
+    - gitlab_postgresql_password
+    - authentik_client_secret
+    - keycloak_gitlab_client_secret
+
+freeipa_client:
+  hostgroups: [service-gitlab]

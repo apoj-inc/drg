@@ -1,0 +1,59 @@
+migrate_services:
+  stage: manual
+  resource_group: terraform-state-migration
+  inputs:
+    services:
+      description: 'Comma-separated service names'
+      default: 'dockerhub'
+    environment:
+      description: 'Deployment environment'
+      default: 'production'
+    mode:
+      description: 'plan or apply'
+      default: 'plan'
+      options:
+        - 'plan'
+        - 'apply'
+    confirm_apply:
+      description: 'Confirm that an apply is intentional'
+      type: boolean
+      default: false
+  id_tokens:
+    OPENBAO_ID_TOKEN:
+      aud: "https://openbao.example.test"
+  variables:
+    OPENBAO_SECRET_JOB: "terraform"
+    OPENBAO_SECRET_SPECS: '[{"environment_name":"PGPASSWORD","mount":"kv","path":"example-cluster","field":"terraform_state_password","file":false,"job_types":["terraform"]}]'
+    TERRAFORM_STATE_DB_HOST: "postgresql.example.test"
+    TERRAFORM_STATE_DB_PORT: "5432"
+    TERRAFORM_STATE_DB_NAME: "terraform_state"
+    TERRAFORM_STATE_DB_USER: "terraform_state"
+    TERRAFORM_STATE_DB_SSLMODE: "disable"
+  script:
+    - command -v tofu
+    - command -v python3
+    - |
+      openbao_env="$(mktemp)"
+      trap 'rm -f "$openbao_env"' EXIT
+      export VAULT_SERVER_URL="https://openbao.example.test"
+      export VAULT_AUTH_PATH="gitlab-ci"
+      export VAULT_AUTH_ROLE="ci"
+      export OPENBAO_ID_TOKEN_NAME="OPENBAO_ID_TOKEN"
+      python3 shared/scripts/load_openbao_secrets.py "$openbao_env"
+      . "$openbao_env"
+    - |
+      export MIGRATION_SERVICES="{% raw %}${{ job.inputs.services }}{% endraw %}"
+      export MIGRATION_ENVIRONMENT="{% raw %}${{ job.inputs.environment }}{% endraw %}"
+      export MIGRATION_MODE="{% raw %}${{ job.inputs.mode }}{% endraw %}"
+      if [ "{% raw %}${{ job.inputs.confirm_apply }}{% endraw %}" = "true" ]; then export MIGRATION_CONFIRM="MIGRATE"; else unset MIGRATION_CONFIRM; fi
+      : "${PGPASSWORD:?terraform_state_password must be configured in OpenBao}"
+      export PG_CONN_STR="postgresql://${TERRAFORM_STATE_DB_USER}@${TERRAFORM_STATE_DB_HOST}:${TERRAFORM_STATE_DB_PORT}/${TERRAFORM_STATE_DB_NAME}?sslmode=${TERRAFORM_STATE_DB_SSLMODE}"
+      export MIGRATION_REPO_ROOT="${CI_PROJECT_DIR}"
+      export MIGRATION_REPORT_PATH="${CI_PROJECT_DIR}/terraform-state-migration-report.json"
+      python3 shared/scripts/migrate_terraform_state.py
+  artifacts:
+    when: always
+    paths:
+      - terraform-state-migration-report.json
+    expire_in: 1 day
+  when: manual

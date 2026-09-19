@@ -1,0 +1,223 @@
+---
+- name: Reconcile all managed Traefik routes from the Traefik host
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('tags_traefik', true) }}"
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../config.yaml
+  vars:
+    traefik_host_entries: "{{ traefik.host_entries | default([]) }}"
+    traefik_metrics_enabled: "{{ traefik.metrics.enabled | default(false) | bool }}"
+    traefik_metrics_entrypoint: "{{ traefik.metrics.entrypoint | default('metrics') }}"
+    traefik_metrics_listen_port: "{{ traefik.metrics.listen_port | default(8082) }}"
+    traefik_middlewares_file: "{{ playbook_dir }}/../middlewares.yml"
+    traefik_proxy_enabled: false
+    traefik_proxy_config_dir: /opt/traefik/config
+    traefik_proxy_compose_dir: /opt/traefik
+    traefik_proxy_route_manifest: "{{ traefik_proxy_compose_dir }}/.managed-route-files.yml"
+    traefik_proxy_hosts: >-
+      {{ groups['tags_traefik'] | default(groups['traefik'] | default([])) }}
+
+  pre_tasks:
+    - name: Validate Traefik proxy host discovery
+      ansible.builtin.assert:
+        that:
+          - traefik_proxy_hosts | length > 0
+        fail_msg: >-
+          No Traefik proxy hosts were found. Expected the tags_traefik inventory
+          group to contain the HA Traefik instances.
+      run_once: true
+
+    - name: Build managed service host list
+      ansible.builtin.set_fact:
+        traefik_managed_route_hosts: >-
+          {{ (traefik_managed_route_hosts | default([])) + [item] }}
+      loop: "{{ groups['all'] }}"
+      run_once: true
+      when: >-
+        'traefik-managed-route' in (hostvars[item]['tags'] | default([])) or
+        'traefik-managed-route' in
+        (hostvars[item]['tags'] | default([]) | map(attribute='slug', default='') | list)
+
+    - name: Discover service Traefik route definitions
+      ansible.builtin.find:
+        paths: "{{ playbook_dir | dirname | dirname | dirname }}"
+        patterns:
+          - traefik.yml
+          - traefik.yml.j2
+        file_type: file
+        recurse: true
+      register: traefik_route_discovery
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Store discovered Jinja service Traefik route definitions
+      ansible.builtin.set_fact:
+        traefik_jinja_route_files: >-
+          {{ traefik_route_discovery.files | map(attribute='path') |
+             select('search', '[\\/]traefik.yml.j2$') | list | sort }}
+      run_once: true
+
+    - name: Store discovered YAML service Traefik route definitions
+      ansible.builtin.set_fact:
+        traefik_yaml_route_files: >-
+          {{ traefik_route_discovery.files | map(attribute='path') |
+             select('search', '[\\/]traefik.yml$') | list | sort }}
+      run_once: true
+
+  tasks:
+    - name: Build unique managed service names
+      ansible.builtin.set_fact:
+        traefik_managed_route_services: >-
+          {{ (traefik_managed_route_services | default([]) +
+              [item | dirname | basename | replace('_', '-')]) | unique | sort }}
+      loop: "{{ (traefik_jinja_route_files + traefik_yaml_route_files) }}"
+      run_once: true
+      when: >-
+        (traefik_managed_route_hosts | default([]) |
+         select('match', '^' ~ (item | dirname | basename | replace('_', '-') | regex_escape) ~ '($|-)') |
+         list | length) > 0
+
+    - name: Render managed service route files on Traefik
+      ansible.builtin.include_role:
+        name: traefik_proxy_config
+      loop: "{{ traefik_managed_route_services | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+      run_once: true
+      vars:
+        traefik_proxy_config_name: "{{ item }}"
+        traefik_route_jinja_file: >-
+          {% set selected = namespace(path='') %}
+          {% for route_file in traefik_jinja_route_files %}
+          {% set service_name = route_file | dirname | basename | replace('_', '-') %}
+          {% if item is match('^' ~ (service_name | regex_escape) ~ '($|-)') %}
+          {% set selected.path = route_file %}
+          {% endif %}
+          {% endfor %}
+          {{ selected.path }}
+        traefik_route_yaml_file: >-
+          {% set selected = namespace(path='') %}
+          {% for route_file in traefik_yaml_route_files %}
+          {% set service_name = route_file | dirname | basename | replace('_', '-') %}
+          {% if item is match('^' ~ (service_name | regex_escape) ~ '($|-)') %}
+          {% set selected.path = route_file %}
+          {% endif %}
+          {% endfor %}
+          {{ selected.path }}
+        traefik_route_file: >-
+          {{ (traefik_route_jinja_file | trim)
+             if (traefik_route_jinja_file | trim | length > 0)
+             else (traefik_route_yaml_file | trim) }}
+        traefik_route_backend_host: >-
+          {{ hostvars[(traefik_managed_route_hosts | select('match', '^' ~ (item | regex_escape) ~ '($|-)') | list | first)]['ansible_host'] }}
+        traefik_route_backend_hosts: >-
+          {{ traefik_managed_route_hosts | select('match', '^' ~ (item | regex_escape) ~ '($|-)') |
+             map('extract', hostvars, 'ansible_host') | list }}
+        traefik_route_template_host: >-
+          {{ traefik_managed_route_hosts |
+             select('match', '^' ~ (item | regex_escape) ~ '($|-)') |
+             list | sort | first }}
+        traefik_route_target_host: >-
+          {{ traefik_managed_route_hosts |
+             select('match', '^' ~ (item | regex_escape) ~ '($|-)') |
+             list | sort | first }}
+
+    - name: Render external service route file on Traefik
+      ansible.builtin.include_role:
+        name: traefik_proxy_config
+      run_once: true
+      vars:
+        traefik_proxy_config_name: external-services
+        traefik_route_file: "{{ playbook_dir }}/../external-services.yml"
+
+    - name: Build active managed route file list
+      ansible.builtin.set_fact:
+        traefik_active_route_config_names: >-
+          {{ traefik_route_config_status | default({}) |
+             dict2items | selectattr('value') | map(attribute='key') | list }}
+      run_once: true
+
+    - name: Validate managed route file names
+      ansible.builtin.assert:
+        that: item is match('^[A-Za-z0-9][A-Za-z0-9_-]*$')
+        fail_msg: "Unsafe Traefik managed route file name: {{ item }}"
+      loop: >-
+        {{ (traefik_managed_route_services | default([])) +
+           (traefik_active_route_config_names | default([])) }}
+      run_once: true
+
+    - name: Read previous managed route file manifest
+      ansible.builtin.slurp:
+        src: "{{ traefik_proxy_route_manifest }}"
+      register: traefik_managed_route_manifest_file
+      failed_when: false
+      changed_when: false
+      delegate_to: "{{ traefik_proxy_hosts | first }}"
+      run_once: true
+
+    - name: Parse previous managed route file manifest
+      ansible.builtin.set_fact:
+        traefik_previous_route_config_names: >-
+          {{
+            (traefik_managed_route_manifest_file.content | b64decode | from_yaml | default([], true))
+            if (traefik_managed_route_manifest_file.content is defined) else []
+          }}
+      run_once: true
+
+    - name: Validate previous managed route file names
+      ansible.builtin.assert:
+        that: item is match('^[A-Za-z0-9][A-Za-z0-9_-]*$')
+        fail_msg: "Unsafe Traefik managed route file name in manifest: {{ item }}"
+      loop: "{{ traefik_previous_route_config_names }}"
+      run_once: true
+
+    - name: Remove stale managed Traefik route files
+      ansible.builtin.file:
+        path: "{{ traefik_proxy_config_dir }}/{{ traefik_stale_route_target.1 }}.yml"
+        state: absent
+      loop: >-
+        {{ traefik_proxy_hosts | product(
+             (((traefik_previous_route_config_names | default([])) +
+               (traefik_managed_route_services | default([]))) | unique |
+              difference(traefik_active_route_config_names | default([])))) |
+           list }}
+      loop_control:
+        loop_var: traefik_stale_route_target
+      delegate_to: "{{ traefik_stale_route_target.0 }}"
+      register: traefik_stale_route_files
+      run_once: true
+
+    - name: Store managed Traefik route file manifest
+      ansible.builtin.copy:
+        dest: "{{ traefik_proxy_route_manifest }}"
+        content: "{{ traefik_active_route_config_names | default([]) | unique | sort | to_nice_yaml }}"
+        mode: "0644"
+      delegate_to: "{{ traefik_target_host }}"
+      loop: "{{ traefik_proxy_hosts }}"
+      loop_control:
+        loop_var: traefik_target_host
+      run_once: true
+
+    - name: Apply dynamic route file changes once
+      community.docker.docker_compose_v2:
+        project_src: "{{ traefik_proxy_compose_dir }}"
+        state: present
+      delegate_to: "{{ traefik_target_host }}"
+      loop: "{{ traefik_proxy_hosts }}"
+      loop_control:
+        loop_var: traefik_target_host
+      run_once: true
+      when: >-
+        (traefik_route_configs_changed | default(false) | bool) or
+        (traefik_stale_route_files is changed)
+
+    - name: Render Traefik static configuration
+      ansible.builtin.include_role:
+        name: traefik_app
+        tasks_from: configure.yml
+      when: inventory_hostname in (groups['tags_traefik'] | default([]))
+
+    - name: Apply updated Traefik static configuration
+      ansible.builtin.meta: flush_handlers

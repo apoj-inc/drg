@@ -1,0 +1,20 @@
+---
+mount: forgejo-actions
+type: jwt
+description: Forgejo Actions OIDC authentication.
+config:
+  oidc_discovery_url: https://forge.example.test/api/actions
+  bound_issuer: https://forge.example.test/api/actions
+  default_role: ci
+roles:
+  - name: ci
+    role_type: jwt
+    user_claim: sub
+    bound_claims_type: glob
+    bound_claims:
+      repository: example-org/drg
+      ref_protected: "false"
+    bound_audiences: [https://openbao.example.test]
+    token_policies: [ci]
+    token_ttl: 15m
+    token_max_ttl: 30m

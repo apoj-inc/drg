@@ -1,0 +1,428 @@
+---
+- name: Install Forgejo Runner prerequisites
+  ansible.builtin.apt:
+    name:
+      - ansible
+      - ca-certificates
+      - curl
+      - git
+      - gnupg
+      - nodejs
+      - freeipa-client
+      - krb5-user
+      - openssh-client
+      - python3
+      - python3-jinja2
+      - python3-hvac
+      - python3-pip
+      - python3-pynetbox
+      - python3-requests
+      - python3-requests-kerberos
+      - python3-tz
+      - python3-yaml
+      - yamllint
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Ensure Forgejo Runner group exists
+  ansible.builtin.group:
+    name: "{{ forgejo_runner_group }}"
+    system: true
+    state: present
+
+- name: Ensure Forgejo Runner user exists
+  ansible.builtin.user:
+    name: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_group }}"
+    create_home: true
+    home: "{{ forgejo_runner_home }}"
+    shell: /bin/bash
+    system: true
+
+- name: Install Docker host support
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Check installed OpenTofu version
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, '-f=${Version}', tofu]
+  register: opentofu_installed_version
+  failed_when: false
+  changed_when: false
+
+- name: Download OpenTofu
+  ansible.builtin.get_url:
+    url: "{{ opentofu_deb_url }}"
+    dest: "{{ opentofu_deb_path }}"
+    mode: "0644"
+    checksum: "{{ opentofu_deb_checksum | default(omit, true) }}"
+  environment: "{{ external_download_environment }}"
+  when: (opentofu_installed_version.stdout | default('') | regex_replace('-.*$', '') | trim) != opentofu_version
+
+- name: Install OpenTofu
+  ansible.builtin.apt:
+    deb: "{{ opentofu_deb_path }}"
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: (opentofu_installed_version.stdout | default('') | regex_replace('-.*$', '') | trim) != opentofu_version
+
+- name: Download Forgejo Runner binary
+  ansible.builtin.get_url:
+    url: "{{ forgejo_runner_binary_url }}"
+    dest: "{{ forgejo_runner_download_path }}"
+    mode: "0755"
+  environment: "{{ external_download_environment }}"
+
+- name: Install Forgejo Runner binary
+  ansible.builtin.copy:
+    src: "{{ forgejo_runner_download_path }}"
+    dest: "{{ forgejo_runner_binary_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  notify: Restart Forgejo Runner
+
+- name: Add Forgejo Runner user to Docker group
+  ansible.builtin.user:
+    name: "{{ forgejo_runner_user }}"
+    groups: docker
+    append: true
+
+- name: Configure OpenTofu provider mirror
+  ansible.builtin.copy:
+    dest: "{{ forgejo_runner_home }}/.tofurc"
+    owner: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_group }}"
+    mode: "0644"
+    content: |
+      provider_installation {
+        network_mirror {
+          url = "{{ opentofu_provider_mirror_url }}"
+          include = [{% for pattern in opentofu_provider_mirror_include %}"{{ pattern }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+        }
+        direct {
+          exclude = [{% for pattern in opentofu_provider_mirror_include %}"{{ pattern }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+        }
+      }
+
+- name: Ensure Forgejo Runner configuration directory exists
+  ansible.builtin.file:
+    path: "{{ forgejo_runner_config_path | dirname }}"
+    state: directory
+    owner: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_group }}"
+    mode: "0750"
+
+- name: Check Forgejo Runner managed registration marker
+  ansible.builtin.stat:
+    path: "{{ forgejo_runner_registration_marker_path }}"
+  register: forgejo_runner_managed_registration
+
+- name: Check legacy Forgejo Runner registration marker
+  ansible.builtin.stat:
+    path: "{{ forgejo_runner_home }}/.runner"
+  register: forgejo_runner_legacy_registration
+
+- name: Read managed Forgejo Runner registration marker
+  ansible.builtin.slurp:
+    src: "{{ forgejo_runner_registration_marker_path }}"
+  register: forgejo_runner_managed_registration_file
+  when: forgejo_runner_managed_registration.stat.exists
+  no_log: true
+
+- name: Load managed Forgejo Runner registration
+  ansible.builtin.set_fact:
+    forgejo_runner_registration_data: >-
+      {{ forgejo_runner_managed_registration_file.content | b64decode | from_json }}
+  when: forgejo_runner_managed_registration.stat.exists
+  no_log: true
+
+- name: Select secret from managed Forgejo Runner registration
+  ansible.builtin.set_fact:
+    forgejo_runner_effective_secret: "{{ forgejo_runner_registration_data.token | default('') }}"
+  when: forgejo_runner_managed_registration.stat.exists
+  no_log: true
+
+- name: Remove legacy Forgejo Runner registration marker
+  ansible.builtin.file:
+    path: "{{ forgejo_runner_home }}/.runner"
+    state: absent
+  when: forgejo_runner_legacy_registration.stat.exists
+
+- name: Validate Forgejo Runner registration source
+  ansible.builtin.assert:
+    that:
+      - >-
+        forgejo_runner_registration_delegate_host_override | length > 0
+        or ('tags_forgejo' in groups and groups['tags_forgejo'] | length > 0)
+    fail_msg: >-
+      A Forgejo host is required in the tags_forgejo inventory group for
+      runner registration.
+
+- name: Probe Forgejo candidates for the active instance
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --output
+      - /dev/null
+      - --max-time
+      - "5"
+      - http://127.0.0.1:3000/api/healthz
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['tags_forgejo'] | default([]) }}"
+  register: forgejo_runner_active_probes
+  changed_when: false
+  failed_when: false
+  when:
+    - forgejo_runner_registration_delegate_host_override | length == 0
+    - not forgejo_runner_managed_registration.stat.exists
+  no_log: true
+
+- name: Select an active Forgejo registration host from the probes
+  ansible.builtin.set_fact:
+    forgejo_runner_registration_delegate_host: "{{ item.item }}"
+  loop: "{{ forgejo_runner_active_probes.results | default([]) }}"
+  when:
+    - forgejo_runner_registration_delegate_host_override | length == 0
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_registration_delegate_host | length == 0
+    - item.rc | default(1) | int == 0
+
+- name: Apply explicit Forgejo registration host override
+  ansible.builtin.set_fact:
+    forgejo_runner_registration_delegate_host: "{{ forgejo_runner_registration_delegate_host_override }}"
+  when:
+    - forgejo_runner_registration_delegate_host_override | length > 0
+    - not forgejo_runner_managed_registration.stat.exists
+
+- name: Validate active Forgejo registration host
+  ansible.builtin.assert:
+    that:
+      - forgejo_runner_registration_delegate_host | length > 0
+    fail_msg: >-
+      No active Forgejo instance responded to the health check. Refusing to
+      register the runner against an inactive Forgejo candidate.
+  when: not forgejo_runner_managed_registration.stat.exists
+
+- name: Check Forgejo Runner secret state
+  ansible.builtin.stat:
+    path: "{{ forgejo_runner_registration_secret_path }}"
+  register: forgejo_runner_secret_state
+
+- name: Generate Forgejo Runner secret
+  ansible.builtin.command: openssl rand -hex 20
+  register: forgejo_runner_generated_secret
+  changed_when: false
+  when:
+    - not forgejo_runner_managed_registration.stat.exists
+    - not forgejo_runner_secret_state.stat.exists
+    - forgejo_runner_registration_secret_override | length == 0
+  no_log: true
+
+- name: Read existing Forgejo Runner secret
+  ansible.builtin.slurp:
+    src: "{{ forgejo_runner_registration_secret_path }}"
+  register: forgejo_runner_existing_secret
+  when:
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_secret_state.stat.exists
+    - forgejo_runner_registration_secret_override | length == 0
+  no_log: true
+
+- name: Select Forgejo Runner secret override
+  ansible.builtin.set_fact:
+    forgejo_runner_effective_secret: "{{ forgejo_runner_registration_secret_override }}"
+  when:
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_registration_secret_override | length > 0
+  no_log: true
+
+- name: Select generated Forgejo Runner secret
+  ansible.builtin.set_fact:
+    forgejo_runner_effective_secret: "{{ forgejo_runner_generated_secret.stdout | trim }}"
+  when:
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_registration_secret_override | length == 0
+    - not forgejo_runner_secret_state.stat.exists
+  no_log: true
+
+- name: Select persisted Forgejo Runner secret
+  ansible.builtin.set_fact:
+    forgejo_runner_effective_secret: "{{ forgejo_runner_existing_secret.content | b64decode | trim }}"
+  when:
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_registration_secret_override | length == 0
+    - forgejo_runner_secret_state.stat.exists
+  no_log: true
+
+- name: Validate Forgejo Runner secret
+  ansible.builtin.assert:
+    that:
+      - forgejo_runner_effective_secret is match('^[0-9a-fA-F]{40}$')
+    fail_msg: Forgejo Runner secret must be exactly 40 hexadecimal characters.
+  when: forgejo_runner_effective_secret is defined
+  no_log: true
+
+- name: Persist Forgejo Runner secret
+  ansible.builtin.copy:
+    dest: "{{ forgejo_runner_registration_secret_path }}"
+    content: "{{ forgejo_runner_effective_secret }}\n"
+    owner: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_group }}"
+    mode: "0600"
+  when:
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_registration_secret_override | length == 0
+  no_log: true
+
+- name: Register Forgejo Runner through Forgejo CLI
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ forgejo_runner_registration_compose_file }}"
+      - exec
+      - -T
+      - --user
+      - git
+      - "{{ forgejo_runner_registration_service }}"
+      - forgejo
+      - forgejo-cli
+      - actions
+      - register
+      - --scope
+      - "{{ forgejo_runner_scope }}"
+      - --labels
+      - "{{ forgejo_runner_labels | join(',') }}"
+      - --secret-stdin
+      - "-"
+  # Ansible may template delegate_to before evaluating when. Keep the value
+  # valid for the skipped/managed-registration case; the task cannot execute
+  # against localhost because the when clause also requires a selected host.
+  delegate_to: "{{ forgejo_runner_registration_delegate_host | default('localhost', true) }}"
+  register: forgejo_runner_cli_registration
+  changed_when:
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_cli_registration.rc == 0
+  failed_when: false
+  retries: 12
+  delay: 5
+  until:
+    - forgejo_runner_cli_registration.rc == 0
+    - >-
+      forgejo_runner_cli_registration.stdout
+      | regex_search('[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
+      is not none
+  args:
+    stdin: "{{ forgejo_runner_effective_secret }}"
+    stdin_add_newline: false
+  when:
+    - forgejo_runner_effective_secret is defined
+    - not forgejo_runner_managed_registration.stat.exists
+    - forgejo_runner_registration_delegate_host | length > 0
+  no_log: true
+
+- name: Report Forgejo Runner registration failure
+  ansible.builtin.assert:
+    that:
+      - forgejo_runner_cli_registration.rc == 0
+      - >-
+        forgejo_runner_cli_registration.stdout
+        | regex_search('[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
+        is not none
+    fail_msg: >-
+      Forgejo CLI runner registration failed (rc={{ forgejo_runner_cli_registration.rc }}).
+      stderr={{ forgejo_runner_cli_registration.stderr | default('') | trim
+      | regex_replace(forgejo_runner_effective_secret | default(''), '[REDACTED]') }}
+      stdout={{ forgejo_runner_cli_registration.stdout | default('') | trim
+      | regex_replace(forgejo_runner_effective_secret | default(''), '[REDACTED]') }}
+  when:
+    - forgejo_runner_effective_secret is defined
+    - not forgejo_runner_managed_registration.stat.exists
+
+- name: Set new Forgejo Runner registration data
+  ansible.builtin.set_fact:
+    forgejo_runner_registration_data:
+      version: 2
+      method: forgejo-cli
+      address: "{{ forgejo_runner_server_url }}"
+      uuid: >-
+        {{ forgejo_runner_cli_registration.stdout
+        | regex_search('[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}') }}
+      token: "{{ forgejo_runner_effective_secret }}"
+  when: not forgejo_runner_managed_registration.stat.exists
+  no_log: true
+
+- name: Persist Forgejo Runner registration marker
+  ansible.builtin.copy:
+    dest: "{{ forgejo_runner_registration_marker_path }}"
+    content: "{{ forgejo_runner_registration_data | to_nice_json }}\n"
+    owner: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_group }}"
+    mode: "0600"
+  when: not forgejo_runner_managed_registration.stat.exists
+  no_log: true
+
+- name: Validate Forgejo Runner registration state
+  ansible.builtin.assert:
+    that:
+      - forgejo_runner_registration_data.uuid | default('') | length > 0
+      - forgejo_runner_registration_data.token | default('') | length > 0
+    fail_msg: The Forgejo Runner registration state does not contain a UUID and token.
+  no_log: true
+
+- name: Render Forgejo Runner configuration
+  ansible.builtin.template:
+    src: runner-config.yml.j2
+    dest: "{{ forgejo_runner_config_path }}"
+    owner: "{{ forgejo_runner_user }}"
+    group: "{{ forgejo_runner_group }}"
+    mode: "0600"
+  notify: Restart Forgejo Runner
+
+- name: Install Forgejo Runner systemd unit
+  ansible.builtin.template:
+    src: forgejo-runner.service.j2
+    dest: /etc/systemd/system/forgejo-runner.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Forgejo Runner
+
+- name: Apply Forgejo Runner configuration before starting
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Forgejo Runner
+  ansible.builtin.systemd:
+    name: forgejo-runner
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verify Forgejo Runner is active
+  ansible.builtin.command: systemctl is-active --quiet forgejo-runner
+  changed_when: false
+
+- name: Mark healthy Forgejo Runner as eligible for canonical DNS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../../../shared/scripts/reconcile_service_dns.py"
+      - mark-eligible
+      - --config
+      - "{{ playbook_dir }}/../config.yaml"
+      - --hostname
+      - "{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  environment:
+    NETBOX_API: "{{ lookup('env', 'NETBOX_API') }}"
+    NETBOX_TOKEN: "{{ lookup('env', 'NETBOX_TOKEN') }}"
+    NETBOX_VALIDATE_CERTS: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') }}"

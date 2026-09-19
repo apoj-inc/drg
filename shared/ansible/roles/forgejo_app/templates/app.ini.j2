@@ -1,0 +1,73 @@
+[DEFAULT]
+APP_NAME = Forgejo
+RUN_USER = git
+WORK_PATH = /data/gitea
+
+[server]
+PROTOCOL = http
+HTTP_ADDR = 0.0.0.0
+HTTP_PORT = {{ forgejo_http_port }}
+ROOT_URL = {{ forgejo_root_url }}
+SSH_PORT = {{ forgejo_ssh_port }}
+START_SSH_SERVER = true
+LFS_START_SERVER = true
+
+[repository]
+ROOT = {{ forgejo_repository_container_root }}
+DISABLE_HTTP_GIT = false
+
+[database]
+DB_TYPE = postgres
+HOST = {{ forgejo_postgresql_host }}:{{ forgejo_postgresql_port }}
+NAME = {{ forgejo_postgresql_database }}
+USER = {{ forgejo_postgresql_username }}
+PASSWD = {{ forgejo_postgresql_password }}
+SSL_MODE = {{ forgejo_postgresql_ssl_mode }}
+
+[security]
+SECRET_KEY = {{ forgejo_secret_key }}
+INTERNAL_TOKEN = {{ forgejo_internal_token }}
+INSTALL_LOCK = true
+REVERSE_PROXY_TRUSTED_PROXIES = {{ forgejo.traefik_trusted_proxy }}
+
+[session]
+PROVIDER = db
+
+[queue]
+TYPE = level
+DATADIR = /data/gitea/queues
+
+[storage]
+STORAGE_TYPE = minio
+MINIO_ENDPOINT = {{ forgejo_s3_endpoint }}
+MINIO_ACCESS_KEY_ID = {{ forgejo_s3_access_key }}
+MINIO_SECRET_ACCESS_KEY = {{ forgejo_s3_secret_key }}
+MINIO_BUCKET = {{ forgejo_s3_bucket }}
+MINIO_BUCKET_LOOKUP = path
+MINIO_LOCATION = {{ forgejo_s3_region }}
+MINIO_USE_SSL = {{ forgejo_s3_use_ssl | lower }}
+
+[lfs]
+JWT_SECRET = {{ forgejo_lfs_jwt_secret }}
+
+[oauth2_client]
+ENABLE_AUTO_REGISTRATION = true
+
+{% if forgejo_oidc_enabled %}[openid]
+ENABLE_OPENID_SIGNIN = true
+ENABLE_OPENID_SIGNUP = false
+
+{% endif %}[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW = false
+
+[metrics]
+ENABLED = true
+TOKEN = {{ forgejo_internal_token }}
+
+[actions]
+ENABLED = true
+DEFAULT_ACTIONS_URL = https://data.forgejo.org
+
+[webhook]
+ALLOWED_HOST_LIST = {{ forgejo_webhook_allowed_host_list }}

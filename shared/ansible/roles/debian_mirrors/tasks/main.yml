@@ -1,0 +1,62 @@
+---
+- name: Configure APT egress proxy
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/80-egress-proxy
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Acquire::ForceIPv4 "true";
+      Acquire::https::Proxy "{{ platform_config.egress_proxy.https }}";
+  when:
+    - ansible_facts.distribution == 'Debian'
+    - platform_config.egress_proxy is defined
+    - platform_config.egress_proxy.https | default('') | length > 0
+
+- name: Remove APT egress proxy when not configured
+  ansible.builtin.file:
+    path: /etc/apt/apt.conf.d/80-egress-proxy
+    state: absent
+  when: >-
+    ansible_facts.distribution == 'Debian' and
+    (platform_config.egress_proxy is not defined or
+    platform_config.egress_proxy.https | default('') | length == 0)
+
+- name: Configure Debian archive mirrors
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/debian.sources
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Types: deb
+      URIs: {{ debian_mirrors_primary }} {{ debian_mirrors_fallback }}
+      Suites: {{ ansible_facts.distribution_release }} {{ ansible_facts.distribution_release }}-updates
+      Components: {{ debian_mirrors_components | join(' ') }}
+  when:
+    - debian_mirrors_enabled | bool
+    - ansible_facts.distribution == 'Debian'
+
+- name: Configure Debian security mirrors
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/debian-security.sources
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      Types: deb
+      URIs: {{ debian_security_mirrors_primary }} {{ debian_security_mirrors_fallback }}
+      Suites: {{ ansible_facts.distribution_release }}-security
+      Components: {{ debian_mirrors_components | join(' ') }}
+  when:
+    - debian_mirrors_enabled | bool
+    - ansible_facts.distribution == 'Debian'
+
+- name: Refresh APT metadata from configured mirrors
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+  environment: "{{ external_download_environment | default({}) }}"
+  when:
+    - debian_mirrors_enabled | bool
+    - ansible_facts.distribution == 'Debian'

@@ -1,0 +1,7 @@
+---
+name: ipa-host-bootstrap
+rules:
+  - path: pki/issue/agent-client
+    capabilities: [update]
+  - path: auth/token/lookup-self
+    capabilities: [read]

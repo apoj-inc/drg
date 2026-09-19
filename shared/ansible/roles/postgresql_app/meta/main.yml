@@ -1,0 +1,9 @@
+---
+galaxy_info:
+  role_name: postgresql_app
+  author: drg
+  description: PostgreSQL server for shared application databases
+  license: MIT
+  min_ansible_version: "2.14"
+dependencies:
+  - role: debian_mirrors

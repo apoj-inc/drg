@@ -1,0 +1,6 @@
+---
+- name: Restart Forgejo
+  community.docker.docker_compose_v2:
+    project_src: "{{ forgejo_compose_dir }}"
+    state: restarted
+  when: not forgejo_managed_by_ha | bool

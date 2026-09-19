@@ -1,0 +1,9 @@
+---
+http:
+  - name: openbao
+    host: "openbao.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 8200
+    middlewares:
+      - lan-and-vpn-only
+      - secure-headers
+      - rate-limit

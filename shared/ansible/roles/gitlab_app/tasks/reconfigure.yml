@@ -1,0 +1,10 @@
+---
+- name: Reconfigure GitLab
+  ansible.builtin.command: gitlab-ctl reconfigure
+  changed_when: false
+
+- name: Disable new account creation in GitLab
+  ansible.builtin.command: >
+    gitlab-rails runner
+    "::Gitlab::CurrentSettings.update!(signup_enabled: false)"
+  changed_when: false

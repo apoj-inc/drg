@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  role_name: monitoring_agent
+  description: Common monitoring agent entrypoint for runtime services.
+  min_ansible_version: "2.16"
+dependencies: []

@@ -1,0 +1,78 @@
+---
+- name: Deploy FreeIPA
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('freeipa', true) }}"
+  serial: 1
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    freeipa_listen_address: "{{ freeipa.listen_address }}"
+    freeipa_hostname: "{{ inventory_hostname }}.{{ freeipa.domain }}"
+    freeipa_web_alias: "{{ dns.canonical_name }}"
+    freeipa_ip_address: "{{ ansible_ip }}"
+    freeipa_domain: "{{ freeipa.domain }}"
+    freeipa_realm: "{{ freeipa.realm }}"
+    freeipa_setup_dns: "{{ freeipa.setup_dns }}"
+    freeipa_no_ntp: "{{ freeipa.no_ntp }}"
+    freeipa_skip_mem_check: "{{ freeipa.skip_mem_check }}"
+    freeipa_setup_ca: "{{ freeipa.setup_ca | default(true) }}"
+    freeipa_reset_data: "{{ freeipa.reset_data | default(false) }}"
+    freeipa_replica_source_host: "{{ freeipa.replica_source_host }}"
+    freeipa_replica_source_ip: "{{ freeipa.replica_source_ip | default('') }}"
+    freeipa_is_primary: "{{ freeipa_hostname == freeipa_replica_source_host }}"
+    freeipa_http_port: "{{ freeipa.ports.http }}"
+    freeipa_https_port: "{{ freeipa.ports.https }}"
+    freeipa_ldap_port: "{{ freeipa.ports.ldap }}"
+    freeipa_ldaps_port: "{{ freeipa.ports.ldaps }}"
+    freeipa_kerberos_port: "{{ freeipa.ports.kerberos }}"
+    freeipa_kpasswd_port: "{{ freeipa.ports.kpasswd }}"
+    freeipa_admin_password: "{{ lookup('env', 'FREEIPA_ADMIN_PASSWORD') }}"
+    freeipa_directory_manager_password: "{{ lookup('env', 'FREEIPA_DIRECTORY_MANAGER_PASSWORD') }}"
+    freeipa_iac_root: "{{ freeipa.iac.root }}"
+    freeipa_iac_profiles_dir: "{{ freeipa.iac.profiles_dir }}"
+    freeipa_iac_identity_dir: "{{ freeipa.iac.identity_dir }}"
+    freeipa_iac_backup_dir: "{{ freeipa.iac.backup_dir }}"
+    freeipa_iac_healthcheck_timeout: "{{ freeipa.iac.healthcheck_timeout_seconds }}"
+    freeipa_iac_healthcheck_sources: "{{ freeipa.iac.healthcheck_sources }}"
+    freeipa_external_dns_validation: "{{ freeipa.iac.external_dns_validation }}"
+    freeipa_iac_identity_files:
+      - "{{ playbook_dir }}/../identity/groups.yaml"
+      - "{{ playbook_dir }}/../identity/hostgroups.yaml"
+      - "{{ playbook_dir }}/../identity/users.yaml"
+      - "{{ playbook_dir }}/../identity/service_users.yaml"
+      - "{{ playbook_dir }}/../identity/roles.yaml"
+      - "{{ playbook_dir }}/../identity/hosts.yaml"
+      - "{{ playbook_dir }}/../identity/services.yaml"
+      - "{{ playbook_dir }}/../identity/hbac.yaml"
+      - "{{ playbook_dir }}/../identity/sudo.yaml"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+    - name: Validate FreeIPA NetBox inventory address
+      ansible.builtin.assert:
+        that:
+          - ansible_ip is defined
+          - ansible_ip | string | length > 0
+        fail_msg: >-
+          FreeIPA requires ansible_ip from NetBox primary_ip4 for
+          ipa-server-install --ip-address.
+
+  roles:
+    - freeipa_app
+    - logging_agent
+
+  post_tasks:
+    - name: Install repository-owned FreeIPA Root CA on Traefik hosts
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../pki/trust/freeipa-ca.crt"
+        dest: /opt/traefik/config/freeipa-ca.crt
+        owner: root
+        group: root
+        mode: "0644"
+      delegate_to: "{{ hostvars[item].ansible_ip }}"
+      loop: "{{ groups['tags_traefik'] | default([]) }}"
+      when:
+        - groups['tags_traefik'] | default([]) | length > 0

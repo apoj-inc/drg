@@ -1,0 +1,26 @@
+---
+defaults:
+  include_template: shared/templates/gitlab-ci-template.yml
+  services_dir: services
+  terraform_dir: terraform
+  ansible_dir: ansible
+  platform_config: environments/example/platform.yaml
+  stages:
+    - validate
+    - plan
+    - approve
+    - apply
+    - configure
+    - ha_sync
+    - powerdns_dns_preview
+    - powerdns_dns_approve
+    - powerdns_dns_apply
+    - traefik_preview
+    - traefik_approve
+    - traefik_apply
+  child_pipeline_sources:
+    - parent_pipeline
+    - pipeline
+  default_environment: production
+
+services: {}

@@ -1,0 +1,7 @@
+[Unit]
+Description=Snapshot Prometheus TSDB to S3
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/grafana-prometheus-snapshot

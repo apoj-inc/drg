@@ -1,0 +1,43 @@
+---
+- name: Validate Keepalived settings
+  ansible.builtin.assert:
+    that:
+      - keepalived_interface | length > 0
+      - keepalived_virtual_ip is match('^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$')
+      - keepalived_virtual_router_id | int >= 1
+      - keepalived_virtual_router_id | int <= 255
+      - keepalived_priority | int >= 1
+      - keepalived_priority | int <= 255
+    fail_msg: Keepalived requires a valid interface, IPv4 CIDR VIP, router ID, and priority.
+
+- name: Install Keepalived
+  ansible.builtin.apt:
+    name: "{{ keepalived_package }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install Keepalived healthcheck
+  ansible.builtin.copy:
+    src: "{{ keepalived_check_script_source }}"
+    dest: "{{ keepalived_check_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render Keepalived configuration
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: "{{ keepalived_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "keepalived -t -f %s"
+  notify: Restart Keepalived
+
+- name: Ensure Keepalived is enabled and running
+  ansible.builtin.systemd:
+    name: "{{ keepalived_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true

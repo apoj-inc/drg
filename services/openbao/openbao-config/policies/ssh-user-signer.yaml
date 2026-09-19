@@ -1,0 +1,5 @@
+---
+name: ssh-user-signer
+rules:
+  - path: ssh-user/sign/user
+    capabilities: [update]

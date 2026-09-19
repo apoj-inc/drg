@@ -1,0 +1,71 @@
+#!/bin/bash
+set -euo pipefail
+
+backend={{ forgejo_ha_storage_backend | quote }}
+resource={{ forgejo_ha_drbd_resource | quote }}
+device={{ forgejo_ha_drbd_device | quote }}
+filesystem={{ forgejo_ha_filesystem | quote }}
+mountpoint={{ forgejo_ha_mountpoint | quote }}
+compose_dir=/opt/forgejo
+
+wait_for_replication() {
+  for _ in $(seq 1 30); do
+    connection_state=$(/usr/sbin/drbdadm cstate "${resource}" 2>/dev/null || true)
+    if [[ "${connection_state}" == Connected ]]; then
+      return 0
+    fi
+    if [[ "${connection_state}" == StandAlone ]]; then
+      /usr/sbin/drbdadm connect "${resource}" || true
+    fi
+    sleep 2
+  done
+  echo "DRBD resource ${resource} is not Connected; refusing Forgejo startup" >&2
+  return 1
+}
+
+start_storage() {
+  if [[ "${backend}" == drbd ]]; then
+    if ! /usr/sbin/drbdadm status "${resource}" 2>/dev/null | grep -q "^${resource} role:"; then
+      /usr/sbin/drbdadm up "${resource}"
+    fi
+    connection_state=$(/usr/sbin/drbdadm cstate "${resource}" 2>/dev/null || true)
+    if [[ "${connection_state}" == StandAlone ]]; then
+      /usr/sbin/drbdadm connect "${resource}"
+    fi
+    wait_for_replication
+    /usr/sbin/drbdadm primary "${resource}"
+  fi
+  if ! /usr/bin/mountpoint -q "${mountpoint}"; then
+    # Mount explicitly; the DRBD device is intentionally not placed in
+    # /etc/fstab because only the etcd lease holder may mount it.
+    /usr/bin/mount -t "${filesystem}" "${device}" "${mountpoint}"
+  fi
+}
+
+stop_storage() {
+  if [[ "${backend}" == drbd ]]; then
+    if /usr/bin/mountpoint -q "${mountpoint}"; then
+      /usr/bin/umount "${mountpoint}"
+    fi
+    /usr/sbin/drbdadm secondary "${resource}"
+  fi
+}
+
+case "${1:-}" in
+  start)
+    start_storage
+    cd "${compose_dir}"
+    /usr/bin/docker compose up -d forgejo
+    ;;
+  stop)
+    if [[ -d "${compose_dir}" ]]; then
+      cd "${compose_dir}"
+      /usr/bin/docker compose down || true
+    fi
+    stop_storage
+    ;;
+  *)
+    echo "usage: $0 start|stop" >&2
+    exit 2
+    ;;
+esac

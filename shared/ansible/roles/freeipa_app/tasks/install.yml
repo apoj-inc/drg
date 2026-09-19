@@ -1,0 +1,69 @@
+---
+- name: Install native FreeIPA packages
+  ansible.builtin.dnf:
+    name:
+      - freeipa-server
+      - freeipa-client
+      - freeipa-healthcheck
+      - bind-utils
+      - firewalld
+      - chrony
+      - qemu-guest-agent
+    state: present
+    update_cache: true
+
+- name: Refuse destructive native reset requests
+  ansible.builtin.assert:
+    that:
+      - not (freeipa_reset_data | bool)
+    fail_msg: >-
+      freeipa.reset_data is no longer supported for native FreeIPA. Uninstalling
+      an IdM server is destructive and must be performed as an explicit manual
+      migration operation.
+
+- name: Enable required native services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - firewalld
+    - chronyd
+    - qemu-guest-agent
+
+- name: Allow FreeIPA services from the internal application network
+  ansible.posix.firewalld:
+    zone: public
+    rich_rule: >-
+      rule family="ipv4"
+      source address="{{ freeipa_firewall_source_cidr }}"
+      service name="{{ item }}"
+      accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - http
+    - https
+    - ldap
+    - ldaps
+    - kerberos
+    - kpasswd
+
+- name: Allow FreeIPA replica synchronization ports internally
+  ansible.posix.firewalld:
+    zone: public
+    rich_rule: >-
+      rule family="ipv4"
+      source address="{{ freeipa_firewall_source_cidr }}"
+      port port="{{ item.split('/')[0] }}"
+      protocol="{{ item.split('/')[1] }}"
+      accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - 7389/tcp
+    - 9443/tcp
+    - 9444/tcp
+    - 9445/tcp

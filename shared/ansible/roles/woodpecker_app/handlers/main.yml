@@ -1,0 +1,56 @@
+---
+- name: Restart Woodpecker server directly
+  listen: Restart Woodpecker server
+  community.docker.docker_compose_v2:
+    project_src: "{{ woodpecker_compose_dir }}"
+    state: restarted
+  notify: Restart Woodpecker agents after server restart
+  when:
+    - not (etcd_ha_managed_by_controller | default(false) | bool)
+    - not (woodpecker_managed_by_ha | default(false) | bool)
+    - not (woodpecker_ha_resource_configured | default(false) | bool)
+
+- name: Restart Woodpecker server through etcd HA controller
+  listen: Restart Woodpecker server
+  ansible.builtin.systemd:
+    name: "{{ etcd_ha_controller_unit }}"
+    state: restarted
+    daemon_reload: true
+  when: etcd_ha_managed_by_controller | default(false) | bool
+
+- name: Restart Woodpecker HA resource
+  listen: Restart Woodpecker server
+  ansible.builtin.command: "pcs resource restart {{ woodpecker_ha_resource_name }}"
+  notify: Restart Woodpecker agents after server restart
+  when: woodpecker_ha_resource_configured | default(false) | bool
+
+- name: Restart Woodpecker agents after server restart
+  ansible.builtin.systemd:
+    name: woodpecker-agent
+    state: restarted
+    daemon_reload: true
+  delegate_to: "{{ item }}"
+  loop: >-
+    {{
+      (
+        groups['woodpecker-agent'] | default([])
+        + groups['tag_woodpecker-agent'] | default([])
+        + (
+          groups['all'] | default([])
+          | select('match', '^woodpecker-agent-')
+          | list
+        )
+      ) | unique | list
+    }}
+  loop_control:
+    label: "{{ item }}"
+  when: >-
+    (
+      groups['woodpecker-agent'] | default([])
+      + groups['tag_woodpecker-agent'] | default([])
+      + (
+        groups['all'] | default([])
+        | select('match', '^woodpecker-agent-')
+        | list
+      )
+    ) | length > 0

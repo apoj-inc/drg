@@ -1,0 +1,16 @@
+resource {{ forgejo_ha_drbd_resource }} {
+  protocol C;
+  net {
+    cram-hmac-alg sha256;
+    shared-secret "{{ forgejo_ha_drbd_shared_secret }}";
+  }
+
+{% for node in groups[forgejo_ha_group] %}
+  on {{ hostvars[node].ansible_host_fqdn | default(node) }} {
+    device {{ forgejo_ha_drbd_device }};
+    disk {{ forgejo_ha_drbd_backing_device }};
+    address {{ hostvars[node].ansible_host }}:{{ forgejo_ha_drbd_port }};
+    meta-disk internal;
+  }
+{% endfor %}
+}

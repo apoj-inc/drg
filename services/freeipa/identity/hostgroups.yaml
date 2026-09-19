@@ -1,0 +1,69 @@
+---
+# Hosts created by this repository. The enrollment account may add hosts here;
+# HBAC and sudo policies are deliberately scoped to this group.
+hostgroups:
+  - name: managed-linux
+    state: present
+    description: Repository-managed Linux service hosts
+  - name: service-freeipa
+    state: present
+    description: FreeIPA hosts
+    host:
+      - freeipa-node-a.example.test
+  - name: service-dockerhub
+    state: present
+    description: Docker Hub cache hosts
+  - name: service-etcd
+    state: present
+    description: etcd hosts
+  - name: service-forgejo-runner
+    state: present
+    description: Forgejo runners
+  - name: service-forgejo
+    state: present
+    description: Forgejo hosts
+  - name: service-gitlab
+    state: present
+    description: GitLab hosts
+  - name: service-gitlab-runner
+    state: present
+    description: GitLab Runner hosts
+  - name: service-grafana
+    state: present
+    description: Grafana hosts
+  - name: service-keycloak
+    state: present
+    description: Keycloak hosts
+  - name: service-llm
+    state: present
+    description: Local LLM hosts
+  - name: service-netbox
+    state: present
+    description: NetBox hosts
+  - name: service-oauth2-proxy
+    state: present
+    description: OAuth2 Proxy hosts
+  - name: service-openbao
+    state: present
+    description: OpenBao hosts
+  - name: service-postgresql
+    state: present
+    description: PostgreSQL hosts
+  - name: service-powerdns
+    state: present
+    description: PowerDNS hosts
+  - name: service-redis
+    state: present
+    description: Redis hosts
+  - name: service-traefik
+    state: present
+    description: Traefik hosts
+  - name: service-versitygw
+    state: present
+    description: VersityGW hosts
+  - name: service-woodpecker
+    state: present
+    description: Woodpecker CI hosts
+  - name: service-woodpecker-agent
+    state: present
+    description: Woodpecker CI execution agents

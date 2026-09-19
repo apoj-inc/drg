@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+
+# This command only defines the cluster resources. It deliberately leaves them
+# disabled until the operator has initialized DRBD and completed the migration.
+{{ pacemaker_ha_cluster_setup_path }}
+pcs resource create forgejo-drbd ocf:linbit:drbd drbd_resource={{ forgejo_ha_drbd_resource }} op monitor interval=15s
+pcs resource promotable forgejo-drbd \
+  promoted-max=1 promoted-node-max=1 clone-max=2 clone-node-max=1 notify=true
+pcs resource create forgejo-filesystem ocf:heartbeat:Filesystem \
+  device={{ forgejo_ha_drbd_device }} directory={{ forgejo_ha_mountpoint }} \
+  fstype={{ forgejo_ha_filesystem }} op monitor interval=20s
+pcs resource create forgejo-service systemd:{{ pacemaker_ha_service_name | regex_replace('\\.service$', '') }} \
+  op monitor interval=20s
+pcs constraint colocation add forgejo-filesystem with Promoted forgejo-drbd-clone INFINITY
+pcs constraint order promote forgejo-drbd-clone then start forgejo-filesystem
+pcs constraint colocation add forgejo-service with forgejo-filesystem INFINITY
+pcs constraint order start forgejo-filesystem then start forgejo-service
+pcs resource disable forgejo-drbd-clone forgejo-filesystem forgejo-service
+
+echo "Resources created and left disabled. Fence the old primary and enable them only after DRBD migration is complete."

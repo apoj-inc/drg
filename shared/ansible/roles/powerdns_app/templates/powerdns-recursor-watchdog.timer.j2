@@ -1,0 +1,11 @@
+[Unit]
+Description=Check the PowerDNS Recursor health periodically
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+Unit=powerdns-recursor-watchdog.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

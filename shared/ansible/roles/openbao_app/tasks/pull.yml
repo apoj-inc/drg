@@ -1,0 +1,4 @@
+---
+- name: Pull OpenBao image
+  community.docker.docker_compose_v2_pull:
+    project_src: "{{ openbao_compose_dir }}"

@@ -1,0 +1,26 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+variable "openstack_cloud" {
+  description = "clouds.yaml entry or OS_CLOUD value used by the provider."
+  type        = string
+  default     = null
+}
+
+variable "openstack_auth_url" {
+  description = "Keystone v3 URL; normally supplied by OS_AUTH_URL."
+  type        = string
+  default     = null
+}
+
+variable "openstack_region" {
+  type    = string
+  default = null
+}
+{% if target == "network" %}
+variable "tenant_project_id" {
+  description = "Optional project ID that owns the tenant network."
+  type        = string
+  default     = null
+}
+{% endif %}

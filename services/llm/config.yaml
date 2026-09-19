@@ -1,0 +1,86 @@
+---
+service:
+  name: llm
+  topology: singleton
+  description: Local Qwen3.8 inference on a dedicated GPU passthrough VM.
+  tags: [opentofu, llm, vllm, gpu, traefik-managed-route]
+
+# Host preparation remains manual. The values below were populated from the
+# pve-node-a audit and PCI mapping output; Terraform deployment is pipeline-managed.
+pipeline:
+  managed: true
+  # Contour jobs target the singleton VM's stable inventory name.
+  rollout_ansible_limit: llm-main
+
+logging:
+  journal_units:
+    - vllm-main
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+
+instance:
+  deployment_cluster: example-cluster
+  node_name: pve-node-a
+  hostname: llm-main
+  vm_id: 104
+
+compute:
+  cpu_cores: 8
+  memory_mb: 65536
+  disk_gb: 200
+  numa_nodes:
+    - device: numa0
+      cpus: "0-7"
+      memory: 65536
+      hostnodes: "0"
+      policy: bind
+
+startup:
+  order: 190
+
+rollout:
+  by_contour: true
+
+gpu:
+  expected_count: 4
+  model_count: 4
+  pci_mappings:
+    - llm-gpu-0
+    - llm-gpu-1
+    - llm-gpu-2
+    - llm-gpu-3
+  expected_product_pattern: NVIDIA GeForce RTX 3080
+  minimum_vram_mib: 9500
+
+nvidia:
+  # Optional pin; leave empty until CUDA/vLLM compatibility is verified.
+  driver_branch: ""
+
+vllm:
+  version: "0.26.0"
+  # Temporary resumable wheelhouse fallback for unreliable large-wheel downloads.
+  emergency_pip: true
+  # Download HF model files with resumable curl before starting vLLM.
+  emergency_model_download: true
+  model_id: sokada4/Qwen3.8-27B-GPTQ-Int4
+  served_model_name: qwen3.8-27b-gptq
+  # Use the four selected GPUs as two pipeline stages with two-way tensor
+  # parallelism, reducing per-rank model overhead while retaining long context.
+  pipeline_parallel_size: 2
+  tensor_parallel_size: 2
+  numa_node: 0
+  max_model_len: 131072
+  max_num_seqs: 1
+  max_num_batched_tokens: 4096
+  gpu_memory_utilization: 0.92
+  host: 0.0.0.0
+  port: 8000
+
+freeipa_client:
+  hostgroups: [service-llm]

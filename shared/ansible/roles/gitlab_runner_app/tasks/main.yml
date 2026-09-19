@@ -1,0 +1,17 @@
+---
+- name: Install GitLab Runner prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Configure GitLab
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Restart GitLab Runner explicitly
+  ansible.builtin.import_tasks: restart.yml
+  tags:
+    - never
+    - restart

@@ -1,0 +1,32 @@
+---
+- name: Deploy Forgejo Runner
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('forgejo-runner', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    forgejo_runner_server_url: "{{ forgejo_runner.server_url }}"
+    forgejo_runner_scope: "{{ forgejo_runner.scope }}"
+    forgejo_runner_capacity: "{{ forgejo_runner.capacity }}"
+    forgejo_runner_registration_secret_override: "{{ lookup('env', 'FORGEJO_RUNNER_SECRET') }}"
+    forgejo_runner_registration_delegate_host_override: >-
+      {{
+        lookup('env', 'FORGEJO_RUNNER_REGISTRATION_DELEGATE_HOST')
+        | default('', true)
+      }}
+    forgejo_runner_registration_delegate_host: ""
+    forgejo_runner_labels: >-
+      {{ forgejo_runner.rollout.runner_labels[
+        lookup('env', 'DEPLOYMENT_CONTOUR') | upper
+      ] | default(['forgejo-host'], true) }}
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - forgejo_runner_app
+    - monitoring_agent
+    - logging_agent

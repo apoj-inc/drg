@@ -1,0 +1,4 @@
+---
+mount: database
+type: database
+description: Reserved for future dynamic PostgreSQL and Redis credentials.

@@ -1,0 +1,150 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "prometheus_ready",
+                    "refId": "A"
+                }
+            ],
+            "title": "Ready",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "sum(up == 0)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Targets down",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "prometheus_config_last_reload_successful",
+                    "refId": "A"
+                }
+            ],
+            "title": "Config reload success",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.99, sum by(le) (rate(prometheus_engine_query_duration_seconds_bucket[5m])))",
+                    "refId": "A"
+                }
+            ],
+            "title": "Query duration p99",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "prometheus_tsdb_head_series",
+                    "legendFormat": "head series",
+                    "refId": "A"
+                },
+                {
+                    "expr": "prometheus_tsdb_storage_blocks_bytes",
+                    "legendFormat": "blocks bytes",
+                    "refId": "B"
+                },
+                {
+                    "expr": "prometheus_tsdb_wal_storage_size_bytes",
+                    "legendFormat": "WAL bytes",
+                    "refId": "C"
+                }
+            ],
+            "title": "TSDB series and storage",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "expr": "scrape_duration_seconds",
+                    "legendFormat": "{{job}} {{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Scrape duration by target",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "prometheus",
+        "monitoring"
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "title": "Prometheus",
+    "uid": "prometheus",
+    "version": 1
+}

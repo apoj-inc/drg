@@ -1,0 +1,16 @@
+[Unit]
+Description=Bring up the Forgejo DRBD resource
+After=network-online.target
+Wants=network-online.target
+Before=forgejo-etcd-ha.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/bin/bash -c '/usr/sbin/drbdadm status {{ forgejo_ha_drbd_resource }} 2>/dev/null | /bin/grep -q "^{{ forgejo_ha_drbd_resource }} role:" || /usr/sbin/drbdadm up {{ forgejo_ha_drbd_resource }}; connection_state=$(/usr/sbin/drbdadm cstate {{ forgejo_ha_drbd_resource }} 2>/dev/null || true); if [ "${connection_state}" = StandAlone ]; then /usr/sbin/drbdadm connect {{ forgejo_ha_drbd_resource }}; fi'
+ExecStop=/usr/sbin/drbdadm down {{ forgejo_ha_drbd_resource }}
+TimeoutStartSec=120
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

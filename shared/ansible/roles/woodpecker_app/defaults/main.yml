@@ -1,0 +1,40 @@
+---
+woodpecker_image: woodpeckerci/woodpecker-server:v3
+woodpecker_compose_dir: /opt/woodpecker
+woodpecker_data_dir: /opt/woodpecker/data
+woodpecker_external_url: https://ci.example.test
+woodpecker_webhook_host: "{{ woodpecker_external_url }}"
+woodpecker_forgejo_url: https://forge.example.test
+woodpecker_forgejo_client: woodpecker
+woodpecker_forgejo_secret: ""
+woodpecker_agent_secret: ""
+woodpecker_admin: example-admin
+woodpecker_organization: example-org
+woodpecker_http_port: 8000
+woodpecker_grpc_port: 9000
+woodpecker_database_host: postgresql.example.test
+woodpecker_database_port: 5432
+woodpecker_database_name: woodpecker
+woodpecker_database_user: woodpecker
+postgresql_woodpecker_password: ""
+woodpecker_grpc_secret: ""
+woodpecker_managed_by_ha: false
+woodpecker_config_extension_listen: 0.0.0.0:9010
+woodpecker_config_extension_endpoint: http://host.docker.internal:9010
+woodpecker_config_extension_netrc: true
+woodpecker_secret_extension_endpoint: http://host.docker.internal:9010/secrets
+woodpecker_secret_extension_netrc: true
+woodpecker_openbao_addr: https://openbao.example.test
+woodpecker_openbao_auth_path: cert
+woodpecker_openbao_cert_role: woodpecker-config-extension
+woodpecker_openbao_ca_file: /etc/woodpecker/openbao/freeipa-ca.crt
+woodpecker_openbao_cert_file: /etc/woodpecker/openbao/client.crt
+woodpecker_openbao_key_file: /etc/woodpecker/openbao/client.key
+woodpecker_openbao_allowed_repositories: example-org/drg
+woodpecker_openbao_cert_hostname: "{{ ansible_fqdn }}"
+woodpecker_openbao_cert_request_principal: "host/{{ woodpecker_openbao_cert_hostname }}"
+woodpecker_openbao_cert_dir: /etc/woodpecker/openbao
+woodpecker_config_extension_dir: /opt/woodpecker-config-extension
+woodpecker_config_extension_binary: /usr/local/bin/woodpecker-config-extension
+woodpecker_config_extension_public_key_file: /etc/woodpecker/extension-public-key.pem
+woodpecker_ha_resource_name: woodpecker-service

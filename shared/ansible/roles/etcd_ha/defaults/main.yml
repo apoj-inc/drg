@@ -1,0 +1,33 @@
+---
+etcd_ha_group: ""
+etcd_ha_etcd_group: etcd
+etcd_ha_service_name: ""
+etcd_ha_service_unit: ""
+etcd_ha_service_description: ""
+etcd_ha_service_working_directory: /
+etcd_ha_service_exec_start: ""
+etcd_ha_service_exec_stop: ""
+etcd_ha_service_after:
+  - network-online.target
+etcd_ha_service_wants:
+  - network-online.target
+etcd_ha_controller_name: ""
+etcd_ha_controller_path: /usr/local/sbin/etcd-ha-controller
+etcd_ha_controller_config_path: /etc/default/etcd-ha-controller
+etcd_ha_controller_unit: ""
+etcd_ha_key_prefix: /drg/ha
+etcd_ha_lease_ttl: 30
+etcd_ha_poll_interval: 2
+etcd_ha_healthcheck_command: ""
+etcd_ha_healthcheck_interval: 2
+etcd_ha_healthcheck_retries: 30
+etcd_ha_endpoint_scheme: http
+etcd_ha_endpoint_port: 2379
+etcd_ha_endpoints: []
+etcd_ha_start_on_bootstrap: true
+etcd_ha_start_controller: true
+etcd_ha_storage_backend: none
+etcd_ha_shared_mountpoint: ""
+etcd_ha_shared_mount_source: ""
+etcd_ha_shared_mount_fstype: nfs
+etcd_ha_shared_mount_options: "vers=4,hard,_netdev,noatime"

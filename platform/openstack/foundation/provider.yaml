@@ -1,0 +1,6 @@
+---
+provider:
+  cloud_variable: openstack_cloud
+  auth_url_variable: openstack_auth_url
+  region_variable: openstack_region
+  version: "~> 3.0"

@@ -1,0 +1,11 @@
+---
+- name: Validate DNS transform settings
+  ansible.builtin.assert:
+    that:
+      - dns_sync_managed_record_types | length > 0
+      - dns_sync_default_ttl | int > 0
+      - dns_sync_default_nameservers | length > 0
+    fail_msg: DNS sync requires managed record types, a positive default TTL, and at least one default nameserver.
+- name: Normalize managed DNS record types
+  ansible.builtin.set_fact:
+    dns_sync_managed_record_types_normalized: "{{ dns_sync_managed_record_types | map('upper') | list }}"

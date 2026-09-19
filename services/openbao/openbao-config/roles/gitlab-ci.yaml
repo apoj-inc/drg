@@ -1,0 +1,5 @@
+---
+auth_mount: gitlab-ci
+name: ci
+policy: ci
+purpose: GitLab CI job JWT role.

@@ -1,0 +1,27 @@
+---
+- name: Detect Docker socket
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: logging_agent_docker_socket
+  when: logging_agent_collect_docker | bool
+
+- name: Detect Docker group
+  ansible.builtin.command: getent group docker
+  register: logging_agent_docker_group
+  changed_when: false
+  failed_when: false
+  when: logging_agent_collect_docker | bool
+
+- name: Set available logging sources
+  ansible.builtin.set_fact:
+    logging_agent_collect_docker_runtime: >-
+      {{
+        logging_agent_collect_docker | bool and
+        logging_agent_docker_socket.stat.exists | default(false) and
+        logging_agent_docker_group.rc | default(1) == 0
+      }}
+    logging_agent_collect_journal_runtime: >-
+      {{
+        logging_agent_collect_journal | bool and
+        logging_agent_journal_units | length > 0
+      }}

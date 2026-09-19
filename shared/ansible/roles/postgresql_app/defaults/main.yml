@@ -1,0 +1,125 @@
+---
+postgresql_version: "17"
+postgresql_port: 5432
+postgresql_database_host: postgresql.example.test
+postgresql_database_port: 5432
+postgresql_database_user: postgres
+postgresql_listen_address: "0.0.0.0"
+postgresql_allowed_cidrs:
+  - 198.51.100.0/24
+  - 192.0.2.0/24
+  - 198.51.100.0/24
+postgresql_host_entries: []
+postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}/main"
+postgresql_nfs_enabled: false
+postgresql_nfs_server: ""
+postgresql_nfs_export: ""
+postgresql_nfs_mountpoint: "/var/lib/postgresql/{{ postgresql_version }}"
+postgresql_nfs_mount_options: "vers=4,hard,_netdev,noatime"
+postgresql_data_disk_enabled: false
+postgresql_data_disk_device: "/dev/sdb"
+postgresql_data_disk_mountpoint: "/var/lib/postgresql"
+postgresql_data_disk_filesystem: ext4
+postgresql_conf_dir: "/etc/postgresql/{{ postgresql_version }}/main"
+postgresql_bin_dir: "/usr/lib/postgresql/{{ postgresql_version }}/bin"
+postgresql_cluster_name: main
+postgresql_encoding: UTF8
+postgresql_locale: C.UTF-8
+postgresql_patroni_enabled: true
+postgresql_patroni_scope: drg-postgresql
+postgresql_patroni_namespace: /service/
+postgresql_patroni_name: "{{ inventory_hostname }}"
+postgresql_patroni_connect_address: "{{ ansible_ip | default(ansible_host, true) | default(inventory_hostname, true) }}"
+postgresql_patroni_restapi_listen_address: "0.0.0.0"
+postgresql_patroni_restapi_port: 8008
+postgresql_patroni_dcs_hosts:
+  - etcd-node-a.example.test:2379
+  - etcd-example-cluster-a-02.example.test:2379
+  - etcd-example-cluster-a-03.example.test:2379
+postgresql_patroni_failsafe_mode: true
+postgresql_patroni_ttl: 60
+postgresql_patroni_loop_wait: 10
+postgresql_patroni_retry_timeout: 15
+postgresql_patroni_maximum_lag_on_failover: 1048576
+postgresql_replication_user: replicator
+postgresql_replication_password: ""
+postgresql_prometheus_user: prometheus
+postgresql_prometheus_password: ""
+postgresql_woodpecker_password: ""
+postgresql_pgbouncer_enabled: true
+postgresql_pgbouncer_port: 6432
+postgresql_pgbouncer_listen_address: "0.0.0.0"
+postgresql_pgbouncer_pool_mode: session
+postgresql_pgbouncer_max_client_conn: 1000
+postgresql_pgbouncer_default_pool_size: 120
+postgresql_pgbouncer_reserve_pool_size: 20
+postgresql_pgbouncer_server_reset_query: DISCARD ALL
+postgresql_shared_preload_libraries:
+  - pg_stat_statements
+postgresql_global_config:
+  password_encryption: scram-sha-256
+  max_connections: "400"
+  shared_buffers: 2GB
+  work_mem: 8MB
+  maintenance_work_mem: 256MB
+  statement_timeout: 60000
+  log_min_duration_statement: 1000
+postgresql_databases:
+  - name: gitlabhq_production
+    owner: gitlab
+    password: "{{ postgresql_gitlab_password }}"
+    extensions:
+      - btree_gist
+      - pg_trgm
+      - amcheck
+      - pg_stat_statements
+  - name: registry
+    owner: registry
+    password: "{{ postgresql_gitlab_registry_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: authentik
+    owner: authentik
+    password: "{{ postgresql_authentik_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: netbox
+    owner: netbox
+    password: "{{ postgresql_netbox_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: netbird
+    owner: netbird
+    password: "{{ postgresql_netbird_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: powerdns
+    owner: powerdns
+    password: "{{ postgresql_powerdns_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: openbao
+    owner: openbao
+    password: "{{ postgresql_openbao_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: forgejo
+    owner: forgejo
+    password: "{{ postgresql_forgejo_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: keycloak
+    owner: keycloak
+    password: "{{ postgresql_keycloak_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: terraform_state
+    owner: terraform_state
+    password: "{{ postgresql_terraform_state_password }}"
+    extensions:
+      - pg_stat_statements
+  - name: woodpecker
+    owner: woodpecker
+    password: "{{ postgresql_woodpecker_password }}"
+    extensions:
+      - pg_stat_statements

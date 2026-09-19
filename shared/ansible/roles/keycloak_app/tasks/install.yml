@@ -1,0 +1,28 @@
+---
+- name: Install Docker
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure Keycloak directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ keycloak_compose_dir }}"
+    - "{{ keycloak_compose_dir }}/import"
+    - "{{ keycloak_compose_dir }}/certs"
+
+- name: Download the FreeIPA CA certificate for LDAP TLS
+  ansible.builtin.get_url:
+    url: "{{ keycloak_freeipa_ca_url }}"
+    dest: "{{ keycloak_freeipa_ca_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate_certs: false
+  when:
+    - keycloak_freeipa_enabled | bool
+    - keycloak_freeipa_ca_url | length > 0

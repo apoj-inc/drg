@@ -1,0 +1,19 @@
+---
+mount: ssh-host
+type: ssh
+description: OpenSSH host certificate authority. Not used for bootstrap in this iteration.
+ca:
+  generate_signing_key: true
+roles:
+  - name: host
+    key_type: ca
+    allow_host_certificates: true
+    allowed_domains: example.test
+    allow_subdomains: true
+    allow_bare_domains: false
+    allowed_user_key_lengths:
+      rsa: 4096
+      ecdsa: 521
+      ed25519: 256
+    ttl: 720h
+    max_ttl: 8760h

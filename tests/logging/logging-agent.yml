@@ -1,0 +1,18 @@
+---
+- name: Test logging agent role on local WSL
+  hosts: logging_test
+  become: true
+  gather_facts: false
+
+  vars:
+    logging_agent_install_method: deb
+    logging_agent_loki_url: http://127.0.0.1:3100/loki/api/v1/push
+    logging_agent_environment: local
+    logging_agent_service: local-wsl
+    logging_agent_cluster: local
+    logging_agent_contour: test
+    logging_agent_journal_units:
+      - alloy
+
+  roles:
+    - logging_agent

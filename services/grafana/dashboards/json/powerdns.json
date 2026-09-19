@@ -1,0 +1,180 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {"mode": "thresholds"},
+                    "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 75}, {"color": "red", "value": 90}]},
+                    "unit": "percent"
+                }
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "up{job=\"powerdns-authoritative\"}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Authoritative up",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "up{job=\"powerdns-recursor\"}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Recursor up",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "rate(pdns_auth_udp_queries[5m]) + rate(pdns_auth_tcp_queries[5m])",
+                    "legendFormat": "QPS",
+                    "refId": "A"
+                },
+                {
+                    "expr": "rate(pdns_auth_servfail_packets[5m]) + rate(pdns_auth_overload_drops[5m])",
+                    "legendFormat": "SERVFAIL/drops",
+                    "refId": "B"
+                }
+            ],
+            "title": "Authoritative QPS and errors",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "rate(pdns_recursor_questions[5m])",
+                    "legendFormat": "questions",
+                    "refId": "A"
+                },
+                {
+                    "expr": "rate(pdns_recursor_cache_hits[5m])",
+                    "legendFormat": "cache hits",
+                    "refId": "B"
+                },
+                {
+                    "expr": "rate(pdns_recursor_cache_misses[5m])",
+                    "legendFormat": "cache misses",
+                    "refId": "C"
+                }
+            ],
+            "title": "Recursor QPS, cache hits and misses",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 14
+            },
+            "id": 5,
+            "options": {
+                "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true, "sortBy": "Max", "sortDesc": true},
+                "tooltip": {"mode": "multi", "sort": "desc"}
+            },
+            "targets": [
+                {
+                    "expr": "100 * (1 - avg by(instance) (rate(node_cpu_seconds_total{service=\"powerdns\",mode=\"idle\"}[5m])))",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "PowerDNS host CPU %",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {"mode": "thresholds"},
+                    "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 75}, {"color": "red", "value": 90}]},
+                    "unit": "percent"
+                }
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            },
+            "id": 6,
+            "options": {
+                "legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true, "sortBy": "Max", "sortDesc": true},
+                "tooltip": {"mode": "multi", "sort": "desc"}
+            },
+            "targets": [
+                {
+                    "expr": "100 * (1 - node_memory_MemAvailable_bytes{service=\"powerdns\"} / node_memory_MemTotal_bytes{service=\"powerdns\"})",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "PowerDNS host RAM used %",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "powerdns",
+        "dns",
+        "dns"
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "title": "PowerDNS",
+    "uid": "powerdns",
+    "version": 3
+}

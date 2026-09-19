@@ -1,0 +1,24 @@
+[Unit]
+Description=Grafana Server
+Documentation=https://grafana.com/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ grafana_user }}
+Group={{ grafana_group }}
+WorkingDirectory={{ grafana_source_dir }}
+ExecStart={{ grafana_binary_path }} server --homepath={{ grafana_source_dir }} --config={{ grafana_config_file }} --packaging=source
+Restart=on-failure
+LimitNOFILE=10000
+TimeoutStopSec=20
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+PrivateTmp=true
+ProtectHome=true
+NoNewPrivileges=true
+ReadWritePaths={{ grafana_data_dir }} {{ grafana_log_dir }} {{ grafana_plugins_dir }}
+
+[Install]
+WantedBy=multi-user.target

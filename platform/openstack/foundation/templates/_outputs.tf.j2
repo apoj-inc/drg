@@ -1,0 +1,36 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+{% if target == "identity" %}
+output "projects" {
+  value = {
+    for name, project in module.project : name => {
+      id   = project.id
+      name = project.name
+    }
+  }
+}
+
+output "application_credentials" {
+  sensitive = true
+  value = {
+    for name, project in module.project : name => project.application_credentials
+  }
+}
+{% elif target == "network" %}
+output "external_network_id" { value = data.openstack_networking_network_v2.external.id }
+output "tenant_network_id" { value = module.tenant.network_id }
+output "tenant_subnet_id" { value = module.tenant.subnet_id }
+output "tenant_cidr" { value = module.tenant.subnet_cidr }
+output "router_id" { value = module.tenant.router_id }
+{% elif target == "security" %}
+output "security_group_ids" { value = module.security_groups.ids }
+{% elif target == "compute-catalog" %}
+output "flavor_ids" {
+  value = { for name, flavor in openstack_compute_flavor_v2.this : name => flavor.id }
+}
+{% elif target == "images" %}
+output "image_ids" {
+  value = { for name, image in module.image : name => image.id }
+}
+{% endif %}

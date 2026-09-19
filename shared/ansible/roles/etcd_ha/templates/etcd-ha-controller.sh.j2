@@ -1,0 +1,126 @@
+#!/bin/bash
+set -euo pipefail
+
+source "${ETCD_HA_CONFIG_FILE:-{{ etcd_ha_controller_config_path }}}"
+
+lease=""
+leader=0
+ready=0
+
+log() {
+  echo "etcd-ha-${ETCD_HA_IDENTITY}: $*" >&2
+  logger -t "etcd-ha-${ETCD_HA_IDENTITY}" -- "$*"
+}
+
+etcd() {
+  /usr/bin/etcdctl --command-timeout=5s --endpoints="${ETCD_ENDPOINTS}" "$@"
+}
+
+stop_service() {
+  if systemctl is-active --quiet "${ETCD_HA_SERVICE_UNIT}"; then
+    systemctl stop "${ETCD_HA_SERVICE_UNIT}" || true
+  elif [[ -n "${ETCD_HA_SERVICE_STOP_COMMAND}" ]]; then
+    bash -c "${ETCD_HA_SERVICE_STOP_COMMAND}" >/dev/null 2>&1 || true
+  fi
+  ready=0
+}
+
+release() {
+  stop_service
+  if [[ -n "${lease}" ]]; then
+    etcd lease revoke "${lease}" >/dev/null 2>&1 || true
+  fi
+}
+
+wait_health() {
+  if [[ -z "${ETCD_HA_HEALTHCHECK_COMMAND}" ]]; then
+    return 0
+  fi
+  for _ in $(seq 1 "${ETCD_HA_HEALTHCHECK_RETRIES}"); do
+    if bash -c "${ETCD_HA_HEALTHCHECK_COMMAND}"; then
+      return 0
+    fi
+    sleep "${ETCD_HA_HEALTHCHECK_INTERVAL}"
+  done
+  return 1
+}
+
+trap release EXIT INT TERM
+
+while true; do
+  if [[ -z "${lease}" ]]; then
+    lease="$(etcd lease grant "${ETCD_HA_LEASE_TTL}" -w simple 2>/dev/null | awk '$1 == "lease" {print $2; exit}')" || lease=""
+    if [[ -z "${lease}" ]]; then
+      log "unable to grant an etcd lease"
+      stop_service
+      sleep "${ETCD_HA_POLL_INTERVAL}"
+      continue
+    fi
+  fi
+
+  if ! etcd lease keep-alive "${lease}" --once >/dev/null 2>&1; then
+    log "etcd lease lost; stopping ${ETCD_HA_SERVICE_UNIT}"
+    lease=""
+    leader=0
+    stop_service
+    sleep "${ETCD_HA_POLL_INTERVAL}"
+    continue
+  fi
+
+  if [[ "${leader}" -eq 0 ]]; then
+    txn_output="/tmp/etcd-ha-txn.$$"
+    if etcd txn <<EOF >"${txn_output}" 2>&1
+version("${ETCD_HA_KEY}") = "0"
+
+put "${ETCD_HA_KEY}" "${ETCD_HA_IDENTITY}" --lease=${lease}
+
+get "${ETCD_HA_KEY}"
+
+EOF
+    then
+      if grep -q '^SUCCESS' /tmp/etcd-ha-txn.$$; then
+        leader=1
+        log "acquired ${ETCD_HA_KEY}"
+      else
+        log "etcd transaction did not acquire ${ETCD_HA_KEY}: $(tr '\n' ' ' <"${txn_output}")"
+      fi
+    else
+      log "etcd transaction failed for ${ETCD_HA_KEY}: $(tr '\n' ' ' <"${txn_output}")"
+    fi
+    rm -f "${txn_output}"
+  fi
+
+  owner="$(etcd get "${ETCD_HA_KEY}" --print-value-only 2>/dev/null || true)"
+  if [[ "${owner}" != "${ETCD_HA_IDENTITY}" ]]; then
+    leader=0
+    stop_service
+    sleep "${ETCD_HA_POLL_INTERVAL}"
+    continue
+  fi
+
+  if [[ "${ready}" -eq 0 ]]; then
+    if systemctl start "${ETCD_HA_SERVICE_UNIT}"; then
+      if wait_health; then
+        ready=1
+        log "started ${ETCD_HA_SERVICE_UNIT}"
+      else
+        log "${ETCD_HA_SERVICE_UNIT} failed readiness; releasing ownership"
+        stop_service
+        etcd lease revoke "${lease}" >/dev/null 2>&1 || true
+        lease=""
+        leader=0
+      fi
+    else
+      log "${ETCD_HA_SERVICE_UNIT} failed readiness; releasing ownership"
+      stop_service
+      etcd lease revoke "${lease}" >/dev/null 2>&1 || true
+      lease=""
+      leader=0
+    fi
+  elif [[ -n "${ETCD_HA_HEALTHCHECK_COMMAND}" ]] && ! bash -c "${ETCD_HA_HEALTHCHECK_COMMAND}"; then
+    log "${ETCD_HA_SERVICE_UNIT} failed health check; stopping service"
+    stop_service
+  fi
+
+  sleep "${ETCD_HA_POLL_INTERVAL}"
+done

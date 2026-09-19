@@ -1,0 +1,16 @@
+[Unit]
+Description={{ etcd_ha_service_description }}
+After={{ etcd_ha_service_after | join(' ') }}
+Wants={{ etcd_ha_service_wants | join(' ') }}
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory={{ etcd_ha_service_working_directory }}
+ExecStart={{ etcd_ha_service_exec_start }}
+ExecStop={{ etcd_ha_service_exec_stop }}
+TimeoutStartSec=180
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+---
+- name: Install host monitoring agent
+  ansible.builtin.include_role:
+    name: node_exporter

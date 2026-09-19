@@ -1,0 +1,20 @@
+runner:
+  capacity: {{ forgejo_runner_capacity }}
+  timeout: 3h
+  labels:
+{% for label in forgejo_runner_labels %}
+    - {{ label }}
+{% endfor %}
+
+log:
+  level: info
+
+container:
+  network: host
+
+server:
+  connections:
+    forgejo:
+      url: {{ forgejo_runner_server_url }}
+      uuid: {{ forgejo_runner_registration_data.uuid }}
+      token: {{ forgejo_runner_registration_data.token }}

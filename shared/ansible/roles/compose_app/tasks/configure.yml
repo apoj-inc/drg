@@ -1,0 +1,6 @@
+---
+- name: Validate compose app name is set
+  ansible.builtin.assert:
+    that:
+      - compose_app_name | length > 0
+    fail_msg: compose_app_name must be set by the service role.

@@ -1,0 +1,23 @@
+---
+compute_catalog:
+  flavors:
+    infra-small:
+      vcpus: 1
+      ram: 2GB
+      disk: 20GB
+      description: Small infrastructure workload
+    infra-medium:
+      vcpus: 2
+      ram: 4GB
+      disk: 40GB
+      description: Medium infrastructure workload
+    db-medium:
+      vcpus: 4
+      ram: 8GB
+      disk: 40GB
+      description: Database workload
+    iam-medium:
+      vcpus: 4
+      ram: 4GB
+      disk: 40GB
+      description: Identity workload

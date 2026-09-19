@@ -1,0 +1,134 @@
+---
+service:
+  name: postgresql
+  topology: clustered
+  description: Three-node PostgreSQL cluster with Patroni and co-located PgBouncer.
+  tags:
+    - opentofu
+    - postgresql
+    - traefik-managed-route
+    - database
+
+startup:
+  order: 20
+
+logging:
+  journal_units:
+    - patroni
+    - pgbouncer@primary
+    - postgresql
+
+rollout:
+  by_contour: true
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1210
+      B:
+        start: 1211
+
+storage:
+  data_disk:
+    enabled: true
+    device: /dev/sdb
+    mountpoint: /var/lib/postgresql
+    filesystem: ext4
+
+compute:
+  cpu_cores: 4
+  memory_mb: 8192
+  disk_gb: 10
+  data_disk_gb: 120
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      dns_name_pattern: postgresql-%{cluster}-%{contour}-%02d
+      role: database
+      ansible_primary: true
+
+dns:
+  canonical_name: postgresql.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+pgbouncer:
+  enabled: true
+  port: 6432
+  listen_address: 0.0.0.0
+  pool_mode: session
+  max_client_conn: 1000
+  default_pool_size: 200
+  reserve_pool_size: 100
+
+postgresql:
+  version: 17
+  listen_address: 0.0.0.0
+  port: 5432
+  database_host: postgresql.example.test
+  database_port: 5432
+  database_user: postgres
+  allowed_cidrs: [198.51.100.0/24, 192.0.2.0/24, 198.51.100.0/24]
+  host_entries:
+    - address: 198.51.100.24
+      names:
+        - etcd-node-a.example.test
+        - etcd-node-a
+    - address: 198.51.100.22
+      names:
+        - etcd-node-b.example.test
+        - etcd-node-b
+    - address: 198.51.100.27
+      names:
+        - etcd-node-c.example.test
+        - etcd-node-c
+  patroni:
+    enabled: true
+    scope: drg-postgresql
+    dcs_hosts: [etcd-node-a.example.test:2379, etcd-node-b.example.test:2379, etcd-node-c.example.test:2379]
+    failsafe_mode: true
+    ttl: 60
+    loop_wait: 10
+    retry_timeout: 15
+  monitoring:
+    username: prometheus
+
+secrets:
+  path: kv/services/postgresql
+  fields:
+    - postgresql_admin_password
+    - postgresql_replication_password
+    - postgresql_gitlab_password
+    - postgresql_gitlab_registry_password
+    - postgresql_authentik_password
+    - postgresql_netbox_password
+    - postgresql_netbird_password
+    - postgresql_powerdns_password
+    - postgresql_forgejo_password
+    - openbao_postgresql_password
+    - postgresql_prometheus_password
+    - keycloak_postgresql_password
+
+secret_imports:
+  - path: kv/services/woodpecker
+    fields:
+      - postgresql_woodpecker_password
+
+freeipa_client:
+  hostgroups: [service-postgresql]

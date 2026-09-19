@@ -1,0 +1,45 @@
+---
+- name: Stop PowerDNS Recursor watchdog during deployment
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    daemon_reload: true
+  loop:
+    - powerdns-recursor-watchdog.timer
+    - powerdns-recursor-watchdog.service
+  failed_when: false
+
+- name: Install PowerDNS prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+- name: Configure PowerDNS database schema
+  ansible.builtin.import_tasks: database.yml
+  tags:
+    - database
+    - configure
+- name: Configure PowerDNS
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Run PowerDNS Compose lifecycle
+  ansible.builtin.import_role:
+    name: compose_app
+  vars:
+    compose_app_name: powerdns
+    compose_app_root: "{{ powerdns_compose_dir }}"
+    compose_app_down_before_deploy: true
+
+- name: Enable PowerDNS Recursor watchdog after deployment
+  ansible.builtin.systemd:
+    name: powerdns-recursor-watchdog.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Check PowerDNS health
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck

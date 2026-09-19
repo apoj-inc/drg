@@ -1,0 +1,14 @@
+---
+collections:
+  # Kolla-Ansible 22.1.0 requires community.general < 12.0.0.
+  # Keep the shared CI collection cache compatible with Kolla: newer
+  # community.general releases no longer provide community.general.modprobe.
+  - name: community.general
+    version: '<12'
+  - name: ansible.posix
+  - name: freeipa.ansible_freeipa
+  - name: netbox.netbox
+  - name: community.docker
+  - name: containers.podman
+  - name: community.hashi_vault
+  - name: middleware_automation.keycloak

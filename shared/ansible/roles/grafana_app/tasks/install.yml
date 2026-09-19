@@ -1,0 +1,17 @@
+---
+- name: Install Grafana from package
+  ansible.builtin.import_tasks: package.yml
+  when: grafana_install_method == "package"
+
+- name: Build and install Grafana from source
+  ansible.builtin.import_tasks: source.yml
+  when: grafana_install_method == "source"
+
+- name: Install Grafana as Docker container
+  ansible.builtin.import_tasks: docker.yml
+  when: grafana_install_method == "docker"
+
+- name: Validate Grafana install method
+  ansible.builtin.fail:
+    msg: "Unsupported grafana_install_method={{ grafana_install_method }}. Use 'docker', 'package', or 'source'."
+  when: grafana_install_method not in ["docker", "package", "source"]

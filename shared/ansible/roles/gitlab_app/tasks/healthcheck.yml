@@ -1,0 +1,11 @@
+---
+- name: Verify GitLab new account creation is disabled
+  ansible.builtin.command: >
+    gitlab-rails runner
+    "puts ::Gitlab::CurrentSettings.signup_enabled"
+  register: gitlab_signup_status
+  changed_when: false
+
+- name: Show GitLab sign-up status
+  ansible.builtin.debug:
+    msg: "GitLab signup_enabled = {{ gitlab_signup_status.stdout }}"

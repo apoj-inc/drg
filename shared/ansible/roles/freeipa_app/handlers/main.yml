@@ -1,0 +1,15 @@
+---
+- name: Restart FreeIPA
+  ansible.builtin.systemd:
+    name: ipa
+    state: restarted
+
+- name: Reload FreeIPA HTTPD
+  ansible.builtin.systemd:
+    name: httpd
+    state: reloaded
+
+- name: Restart FreeIPA HTTPD
+  ansible.builtin.systemd:
+    name: httpd
+    state: restarted

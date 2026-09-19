@@ -1,0 +1,33 @@
+---
+oauth2_proxy_image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3
+oauth2_proxy_compose_dir: /opt/oauth2-proxy
+oauth2_proxy_listen_address: 0.0.0.0
+oauth2_proxy_http_port: 4180
+oauth2_proxy_metrics_port: 44180
+oauth2_proxy_hostname: https://oauth2.example.test
+oauth2_proxy_issuer_url: https://keycloak.example.test/realms/drg
+oauth2_proxy_keycloak_hostname: keycloak.example.test
+oauth2_proxy_keycloak_ip: ""
+oauth2_proxy_keycloak_direct_url: ""
+oauth2_proxy_skip_oidc_discovery: false
+oauth2_proxy_client_id: oauth2-proxy
+oauth2_proxy_client_secret: ""
+oauth2_proxy_cookie_secret: ""
+oauth2_proxy_cookie_domain: .example.test
+oauth2_proxy_cookie_name: _oauth2_proxy
+oauth2_proxy_cookie_expire: 8h
+oauth2_proxy_cookie_refresh: 1h
+oauth2_proxy_cookie_samesite: lax
+oauth2_proxy_redirect_url: https://oauth2.example.test/oauth2/callback
+oauth2_proxy_upstream: static://202
+oauth2_proxy_email_domains: '*'
+oauth2_proxy_whitelist_domains: []
+oauth2_proxy_insecure_oidc_allow_unverified_email: false
+oauth2_proxy_scope: openid profile email groups
+oauth2_proxy_trusted_proxy_ips: 198.51.100.0/24,192.0.2.0/24,198.51.100.0/24
+oauth2_proxy_set_xauthrequest: true
+oauth2_proxy_pass_authorization_header: true
+oauth2_proxy_pass_access_token: true
+oauth2_proxy_set_authorization_header: true
+oauth2_proxy_reverse_proxy: true
+oauth2_proxy_healthcheck_url: http://127.0.0.1:4180/ping

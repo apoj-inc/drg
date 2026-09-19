@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euo pipefail
+
+compose_dir={{ woodpecker_ha_compose_dir | quote }}
+public_key={{ woodpecker_ha_public_key_file | quote }}
+http_port={{ woodpecker_ha_http_port | quote }}
+
+case "${1:-}" in
+  start)
+    cd "${compose_dir}"
+    echo "Starting Woodpecker server container" >&2
+    /usr/bin/docker compose up -d woodpecker-server
+    tmp_key="${public_key}.new"
+    for attempt in $(seq 1 60); do
+      if /usr/bin/curl --fail --silent --show-error \
+          --connect-timeout 2 --max-time 5 \
+          "http://127.0.0.1:${http_port}/api/signature/public-key" > "${tmp_key}"; then
+        /usr/bin/install -o root -g root -m 0644 "${tmp_key}" "${public_key}"
+        /usr/bin/rm -f "${tmp_key}"
+        /usr/bin/systemctl restart woodpecker-config-extension
+        echo "Woodpecker server is ready" >&2
+        exit 0
+      fi
+      if (( attempt == 1 || attempt % 10 == 0 )); then
+        echo "Waiting for Woodpecker signing-key endpoint (attempt ${attempt}/60)" >&2
+      fi
+      /usr/bin/sleep 2
+    done
+    echo "Woodpecker server failed to become ready; container state and logs:" >&2
+    /usr/bin/docker compose ps -a >&2 || true
+    /usr/bin/docker compose logs --tail=100 --no-log-prefix woodpecker-server >&2 || true
+    echo "Woodpecker server did not expose a non-empty signing key" >&2
+    exit 1
+    ;;
+  stop)
+    /usr/bin/systemctl stop woodpecker-config-extension || true
+    if [[ -d "${compose_dir}" ]]; then
+      cd "${compose_dir}"
+      /usr/bin/docker compose down
+    fi
+    ;;
+  *)
+    echo "usage: $0 start|stop" >&2
+    exit 2
+    ;;
+esac

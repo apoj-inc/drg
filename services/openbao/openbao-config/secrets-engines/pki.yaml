@@ -1,0 +1,16 @@
+---
+mount: pki
+type: pki
+description: Workload X.509 certificates.
+max_lease_ttl: 8760h
+ca:
+  common_name: OpenBao Workload CA
+  ttl: 87600h
+roles:
+  - name: agent-client
+    allowed_domains: [example.test]
+    allow_subdomains: true
+    allow_bare_domains: false
+    client_flag: true
+    server_flag: false
+    max_ttl: 24h

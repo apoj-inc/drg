@@ -1,0 +1,41 @@
+---
+- name: Deploy local Qwen inference service
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('llm-main', true) }}"
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    llm_expected_gpu_count: "{{ gpu.expected_count }}"
+    llm_expected_gpu_product_pattern: "{{ gpu.expected_product_pattern }}"
+    llm_minimum_vram_mib: "{{ gpu.minimum_vram_mib }}"
+    llm_model_gpu_uuids: >-
+      {{ lookup('env', 'LLM_MODEL_GPU_UUIDS').split(',')
+      | map('trim') | reject('equalto', '') | list }}
+    llm_nvidia_driver_branch: "{{ nvidia.driver_branch }}"
+    llm_vllm_version: "{{ vllm.version }}"
+    llm_emergency_pip: "{{ vllm.emergency_pip | default(false) | bool }}"
+    llm_emergency_model_download: "{{ vllm.emergency_model_download | default(false) | bool }}"
+    llm_model_id: "{{ vllm.model_id }}"
+    llm_model_path: >-
+      {{ (llm_emergency_model_download | bool)
+      | ternary(llm_emergency_model_dir, llm_model_id) }}
+    llm_served_model_name: "{{ vllm.served_model_name }}"
+    llm_pipeline_parallel_size: "{{ vllm.pipeline_parallel_size }}"
+    llm_tensor_parallel_size: "{{ vllm.tensor_parallel_size }}"
+    llm_numa_node: "{{ vllm.numa_node }}"
+    llm_max_model_len: "{{ vllm.max_model_len }}"
+    llm_max_num_seqs: "{{ vllm.max_num_seqs }}"
+    llm_max_num_batched_tokens: "{{ vllm.max_num_batched_tokens }}"
+    llm_gpu_memory_utilization: "{{ vllm.gpu_memory_utilization }}"
+    llm_api_host: "{{ vllm.host }}"
+    llm_api_port: "{{ vllm.port }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - llm_app
+    - logging_agent

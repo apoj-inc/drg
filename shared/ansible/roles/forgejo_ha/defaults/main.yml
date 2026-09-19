@@ -1,0 +1,17 @@
+---
+forgejo_ha_group: forgejo
+forgejo_ha_backend: etcd
+forgejo_ha_storage_backend: drbd
+forgejo_ha_drbd_resource: forgejo
+forgejo_ha_drbd_device: /dev/drbd0
+forgejo_ha_drbd_backing_device: /dev/sdb
+forgejo_ha_drbd_port: 7789
+forgejo_ha_drbd_unit: forgejo-drbd.service
+forgejo_ha_mountpoint: /srv/forgejo-drbd
+forgejo_ha_filesystem: ext4
+forgejo_ha_shared_mount_source: ""
+forgejo_ha_shared_mount_fstype: nfs
+forgejo_ha_shared_mount_options: "vers=4,hard,_netdev,noatime"
+forgejo_ha_drbd_shared_secret: ""
+forgejo_ha_resource_setup_path: /usr/local/sbin/forgejo-ha-resource-setup
+forgejo_ha_control_path: /usr/local/sbin/forgejo-ha-control

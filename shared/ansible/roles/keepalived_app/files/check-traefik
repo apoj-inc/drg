@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+status="$(docker inspect --format '{{.State.Health.Status}}' traefik 2>/dev/null || true)"
+[ "$status" = healthy ]

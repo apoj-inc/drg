@@ -1,0 +1,3 @@
+---
+# Managed FreeIPA groups. An absent object is not deleted automatically.
+groups: []

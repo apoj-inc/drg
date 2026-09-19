@@ -1,0 +1,17 @@
+---
+{# Render one shared TCP route from the first PostgreSQL inventory host. #}
+{% set postgresql_hosts = groups['all'] | select('match', '^postgresql-') | list | sort %}
+{% if (traefik_route_static_discovery | default(false) | bool) or (postgresql_hosts | length > 0 and (traefik_route_target_host | default(inventory_hostname)) == (postgresql_hosts | first)) %}
+tcp:
+  - name: postgresql
+    entrypoints:
+      - postgresql
+    listen_port: 5432
+    backend_addresses:
+{% for host in postgresql_hosts %}
+      - {{ host }}.{{ traefik_domain | default('example.test', true) }}:6432
+{% endfor %}
+    health_check:
+      interval: 10s
+      timeout: 3s
+{% endif %}

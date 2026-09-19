@@ -1,0 +1,117 @@
+---
+- name: Validate PostgreSQL NFS settings
+  ansible.builtin.assert:
+    that:
+      - postgresql_nfs_server | string | length > 0
+      - postgresql_nfs_export | string | length > 0
+      - postgresql_data_dir.startswith(postgresql_nfs_mountpoint + '/')
+    fail_msg: >-
+      POSTGRESQL_NFS_SERVER and POSTGRESQL_NFS_EXPORT must be provided, and
+      postgresql_data_dir must be below postgresql_nfs_mountpoint.
+
+- name: Install NFS client utilities
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+    update_cache: true
+
+- name: Ensure PostgreSQL NFS mountpoint exists
+  ansible.builtin.file:
+    path: "{{ postgresql_nfs_mountpoint }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check whether PostgreSQL is already installed
+  ansible.builtin.stat:
+    path: /usr/bin/pg_ctlcluster
+  register: postgresql_nfs_pg_installed
+
+- name: Stop PostgreSQL before mounting its data filesystem
+  ansible.builtin.service:
+    name: postgresql
+    state: stopped
+  when: postgresql_nfs_pg_installed.stat.exists
+
+- name: Mount PostgreSQL NFS export
+  ansible.posix.mount:
+    path: "{{ postgresql_nfs_mountpoint }}"
+    src: "{{ postgresql_nfs_server }}:{{ postgresql_nfs_export }}"
+    fstype: nfs
+    opts: "{{ postgresql_nfs_mount_options }}"
+    state: mounted
+
+- name: Check that the NFS export contains a PostgreSQL cluster
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: postgresql_nfs_cluster_marker
+
+- name: Refuse to start PostgreSQL against an empty NFS export
+  ansible.builtin.assert:
+    that:
+      - postgresql_nfs_cluster_marker.stat.exists
+    fail_msg: >-
+      {{ postgresql_data_dir }} is mounted from NFS but does not contain PG_VERSION.
+      Copy the stopped PostgreSQL cluster to the export before enabling NFS.
+  # Patroni can bootstrap an empty export on the first member and clone it on
+  # subsequent members. A standalone PostgreSQL cluster cannot.
+  when:
+    - postgresql_nfs_pg_installed.stat.exists
+    - not postgresql_patroni_enabled | bool
+
+- name: Ensure PostgreSQL systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/postgresql.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure PostgreSQL data directory ownership on NFS
+  ansible.builtin.file:
+    path: "{{ postgresql_data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    recurse: true
+  when: postgresql_nfs_pg_installed.stat.exists
+
+- name: Restrict PostgreSQL data directory permissions on NFS
+  ansible.builtin.file:
+    path: "{{ postgresql_data_dir }}"
+    state: directory
+    mode: "0700"
+  when: postgresql_nfs_pg_installed.stat.exists
+
+- name: Install PostgreSQL systemd mount dependency
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/postgresql.service.d/10-nfs-data.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      RequiresMountsFor={{ postgresql_data_dir }}
+  notify: Reload systemd
+
+- name: Ensure Patroni systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/patroni.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: postgresql_patroni_enabled | bool
+
+- name: Install Patroni systemd mount dependency
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/patroni.service.d/10-nfs-data.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      RequiresMountsFor={{ postgresql_data_dir }}
+  notify: Reload systemd
+  when: postgresql_patroni_enabled | bool

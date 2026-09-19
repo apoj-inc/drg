@@ -1,0 +1,243 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "up{job=\"forgejo\"}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Forgejo up",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "gitea_repositories",
+                    "refId": "A"
+                }
+            ],
+            "title": "Repositories",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "gitea_issues_open",
+                    "refId": "A"
+                }
+            ],
+            "title": "Open issues",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "gitea_hooktasks",
+                    "refId": "A"
+                }
+            ],
+            "title": "Hook tasks",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "sum by(router,code) (rate(traefik_router_requests_total{router=~\".*forge.*\"}[5m]))",
+                    "legendFormat": "{{router}} {{code}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik requests by route/code",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by(le,router) (rate(traefik_router_request_duration_seconds_bucket{router=~\".*forge.*\"}[5m])))",
+                    "legendFormat": "{{router}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik p95 latency",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 14
+            },
+            "id": 7,
+            "targets": [
+                {
+                    "expr": "sum(up{job=\"node\",service=\"forgejo\"})",
+                    "refId": "A"
+                }
+            ],
+            "title": "Forgejo HA nodes reachable",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 14
+            },
+            "id": 8,
+            "targets": [
+                {
+                    "expr": "sum(up{job=\"forgejo\",service=\"forgejo\"})",
+                    "refId": "A"
+                }
+            ],
+            "title": "Active Forgejo nodes",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            },
+            "id": 9,
+            "targets": [
+                {
+                    "expr": "up{job=\"node\",service=\"forgejo\"}",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Forgejo HA node availability",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 22
+            },
+            "id": 10,
+            "targets": [
+                {
+                    "expr": "100 * node_filesystem_avail_bytes{job=\"node\",service=\"forgejo\",mountpoint=\"/srv/forgejo-drbd\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{job=\"node\",service=\"forgejo\",mountpoint=\"/srv/forgejo-drbd\",fstype!~\"tmpfs|overlay\"}",
+                    "legendFormat": "{{instance}} DRBD free",
+                    "refId": "A"
+                }
+            ],
+            "title": "DRBD filesystem free space",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 22
+            },
+            "id": 11,
+            "targets": [
+                {
+                    "expr": "max by (url) (traefik_service_server_up{exported_service=~\".*forgejo.*\"})",
+                    "legendFormat": "{{url}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik Forgejo backend state",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "forgejo",
+        "traefik"
+    ],
+    "time": {
+        "from": "now-24h",
+        "to": "now"
+    },
+    "title": "Forgejo",
+    "uid": "forgejo",
+    "version": 1
+}

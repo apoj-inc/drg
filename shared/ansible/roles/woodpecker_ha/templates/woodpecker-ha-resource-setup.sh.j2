@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+
+# This command only defines the cluster resource. It deliberately leaves the
+# resource disabled until both nodes have joined the same Pacemaker cluster
+# and any direct-start Woodpecker containers have been stopped.
+{{ pacemaker_ha_cluster_setup_path }}
+
+if ! pcs resource config {{ pacemaker_ha_resource_name }} >/dev/null 2>&1; then
+  pcs resource create {{ pacemaker_ha_resource_name }} \
+    systemd:{{ pacemaker_ha_service_name | regex_replace('\\.service$', '') }} \
+    op monitor interval=20s
+  pcs resource meta {{ pacemaker_ha_resource_name }} resource-stickiness=100
+fi
+
+pcs resource disable {{ pacemaker_ha_resource_name }}
+echo "Resource created and left disabled. Stop direct containers, then enable it with:"
+echo "  pcs resource enable {{ pacemaker_ha_resource_name }}"

@@ -1,0 +1,6 @@
+---
+dns_sync_netbox_api_url: "{{ lookup('env', 'NETBOX_API') | default('', true) }}"
+dns_sync_netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') | default('', true) }}"
+dns_sync_netbox_validate_certs: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') | default('false', true) | bool }}"
+dns_sync_netbox_zones_endpoint: "{{ lookup('env', 'DNS_SYNC_NETBOX_ZONES_ENDPOINT') | default('/api/plugins/netbox-dns/zones/', true) }}"
+dns_sync_netbox_records_endpoint: "{{ lookup('env', 'DNS_SYNC_NETBOX_RECORDS_ENDPOINT') | default('/api/plugins/netbox-dns/records/', true) }}"

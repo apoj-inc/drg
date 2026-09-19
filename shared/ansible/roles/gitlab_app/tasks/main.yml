@@ -1,0 +1,28 @@
+---
+- name: Configure GitLab
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Install GitLab prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Reconfigure GitLab explicitly
+  ansible.builtin.import_tasks: reconfigure.yml
+  tags:
+    - never
+    - reconfigure
+
+- name: Restart GitLab explicitly
+  ansible.builtin.import_tasks: restart.yml
+  tags:
+    - never
+    - restart
+
+- name: Check GitLab health
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck

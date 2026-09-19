@@ -1,0 +1,143 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ansible
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - git
+      - gnupg
+      - freeipa-client
+      - krb5-user
+      - openssh-client
+      - python3
+      - python3-dev
+      - python3-jinja2
+      - python3-hvac
+      - python3-openstackclient
+      - python3-pip
+      - python3-pynetbox
+      - python3-requests
+      - python3-requests-kerberos
+      - python3-tz
+      - python3-venv
+      - python3-yaml
+      - yamllint
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Check installed OpenTofu package version
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - -W
+      - -f=${Version}
+      - tofu
+  register: opentofu_installed_version
+  failed_when: false
+  changed_when: false
+
+- name: Normalize installed OpenTofu version
+  ansible.builtin.set_fact:
+    opentofu_installed_version_normalized: >-
+      {{ opentofu_installed_version.stdout | trim | regex_replace('-.*$', '') }}
+
+- name: Download OpenTofu deb package
+  ansible.builtin.get_url:
+    url: "{{ opentofu_deb_url }}"
+    dest: "{{ opentofu_deb_path }}"
+    mode: "0644"
+    checksum: "{{ opentofu_deb_checksum | default(omit, true) }}"
+  environment: "{{ external_download_environment }}"
+  when: opentofu_installed_version_normalized != opentofu_version
+
+- name: Install OpenTofu from downloaded deb package
+  ansible.builtin.apt:
+    deb: "{{ opentofu_deb_path }}"
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: opentofu_installed_version_normalized != opentofu_version
+
+- name: Verify OpenTofu is available to shell executor jobs
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/env
+      - tofu
+      - version
+  changed_when: false
+
+- name: Copy Ansible collection requirements to GitLab Runner
+  ansible.builtin.copy:
+    dest: /tmp/ansible-collections-requirements.yml
+    mode: "0644"
+    content: "{{ lookup('file', role_path ~ '/../../collections/requirements.yml') }}"
+
+- name: Install all Ansible collections required by the project
+  ansible.builtin.command:
+    argv:
+      - ansible-galaxy
+      - collection
+      - install
+      - -r
+      - /tmp/ansible-collections-requirements.yml
+      - -p
+      - /usr/share/ansible/collections
+  register: ansible_collections_install
+  changed_when: >-
+    'Nothing to do' not in ansible_collections_install.stdout
+
+- name: Download GitLab Runner repository setup script
+  ansible.builtin.command:
+    argv:
+      - curl
+      - -fsSL
+      - https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh
+      - -o
+      - /tmp/gitlab-runner-repo.sh
+  args:
+    creates: /tmp/gitlab-runner-repo.sh
+  environment: "{{ external_download_environment }}"
+
+- name: Make GitLab repository setup script executable
+  ansible.builtin.file:
+    path: /tmp/gitlab-runner-repo.sh
+    mode: "0755"
+
+- name: Add GitLab Runner package repository
+  ansible.builtin.command: /tmp/gitlab-runner-repo.sh
+  args:
+    creates: /etc/apt/sources.list.d/runner_gitlab-runner.list
+
+- name: Install GitLab Runner
+  ansible.builtin.apt:
+    name: gitlab-runner
+    state: present
+    update_cache: true
+
+- name: Configure OpenTofu provider mirror for GitLab Runner
+  ansible.builtin.copy:
+    dest: "{{ gitlab_runner_home }}/.tofurc"
+    owner: gitlab-runner
+    group: gitlab-runner
+    mode: "0644"
+    content: |
+      provider_installation {
+        network_mirror {
+          url = "{{ opentofu_provider_mirror_url }}"
+          include = [{% for pattern in opentofu_provider_mirror_include %}"{{ pattern }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+        }
+        direct {
+          exclude = [{% for pattern in opentofu_provider_mirror_include %}"{{ pattern }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+        }
+      }
+
+- name: Install Docker
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Give permission for Docker
+  ansible.builtin.command: usermod -aG docker gitlab-runner

@@ -1,0 +1,104 @@
+{
+  "realm": "{{ keycloak_realm }}",
+  "displayName": "{{ keycloak_display_name }}",
+  "enabled": true,
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+  "sslRequired": "external",
+  "groups": [
+    {
+      "name": "openbao-user"
+    },
+    {
+      "name": "openbao-admin"
+    }
+  ],
+  "clients": [
+{% for client in keycloak_clients %}
+    {
+      "clientId": {{ client.client_id | to_json }},
+      "name": {{ client.name | to_json }},
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": {{ ('$' ~ '{' ~ client.secret_env ~ '}') | to_json }},
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": {{ client.redirect_uris | to_json }},
+      "webOrigins": {{ client.web_origins | to_json }},
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ],
+  "components": {
+{% if keycloak_freeipa_enabled | bool %}
+    "org.keycloak.storage.UserStorageProvider": [
+      {
+        "name": "freeipa",
+        "providerId": "ldap",
+        "config": {
+          "priority": ["0"],
+          "enabled": ["true"],
+          "vendor": ["other"],
+          "connectionUrl": ["{{ keycloak_freeipa_connection_url }}"],
+          "usersDn": ["{{ keycloak_freeipa_users_dn }}"],
+          "usernameLDAPAttribute": ["{{ keycloak_freeipa_username_ldap_attribute }}"],
+          "rdnLDAPAttribute": ["{{ keycloak_freeipa_rdn_ldap_attribute }}"],
+          "uuidLDAPAttribute": ["{{ keycloak_freeipa_uuid_ldap_attribute }}"],
+          "userObjectClasses": ["{{ keycloak_freeipa_user_object_classes }}"],
+          "authType": ["simple"],
+          "bindDn": ["{{ keycloak_freeipa_bind_dn }}"],
+          "bindCredential": ["${KEYCLOAK_FREEIPA_BIND_PASSWORD}"],
+          "searchScope": ["1"],
+          "useTruststoreSpi": ["ldapsOnly"],
+          "allowKerberosAuthentication": ["{{ (keycloak_freeipa_allow_kerberos_authentication | bool) | ternary('true', 'false') }}"],
+          "useKerberosForPasswordAuthentication": ["{{ (keycloak_freeipa_use_kerberos_for_password_authentication | bool) | ternary('true', 'false') }}"],
+          "connectionPooling": ["true"],
+          "pagination": ["true"],
+          "importEnabled": ["{{ (keycloak_freeipa_import_users | bool) | ternary('true', 'false') }}"],
+          "syncRegistrations": ["false"],
+          "editMode": ["{{ keycloak_freeipa_edit_mode }}"]
+        },
+        "subComponents": {
+          "org.keycloak.storage.ldap.mappers.LDAPStorageMapper": [
+{% for mapper in keycloak_ldap_mappers %}
+            {
+              "name": {{ mapper.name | to_json }},
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute": [{{ mapper.ldap_attribute | to_json }}],
+                "user.model.attribute": [{{ mapper.user_model_attribute | to_json }}],
+                "is.mandatory.in.ldap": [{{ ((mapper.mandatory | bool) | ternary('true', 'false')) | to_json }}],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["false"],
+                "attribute.force.default": ["false"],
+                "is.binary.attribute": ["false"]
+              }
+            }{% if not loop.last %},{% endif %}
+{% endfor %}
+          ]
+        }
+      }
+    ]
+{% endif %}
+  }
+}

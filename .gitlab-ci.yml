@@ -1,0 +1,111 @@
+---
+variables:
+  ANSIBLE_HOST_KEY_CHECKING: "False"
+  GIT_STRATEGY: "clone"
+  GIT_DEPTH: "0"
+  TF_INPUT: "false"
+  TOFU_IN_AUTOMATION: "true"
+  ENVIRONMENT: "Podolsk"
+  IPA_CLIENT_REALM: "EXAMPLE.TEST"
+  IPA_CLIENT_SERVERS: "freeipa-node-a.example.test freeipa-node-b.example.test"
+
+stages:
+  - validate
+  - generate
+  - services
+
+tofu:fmt:
+  stage: validate
+  before_script:
+    - command -v tofu
+  script:
+    - tofu fmt -check -recursive
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_MERGE_REQUEST_TARGET_BRANCH'
+      changes:
+        - "**/*.tf"
+        - ".gitlab-ci.yml"
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes:
+        - "**/*.tf"
+        - ".gitlab-ci.yml"
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+repository:validate:
+  stage: validate
+  script:
+    - python3 -c "import jinja2, yaml"
+    - python3 shared/scripts/validate_repository.py
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_MERGE_REQUEST_TARGET_BRANCH'
+    - if: '$CI_MERGE_REQUEST_IID'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+generate-pipeline:
+  stage: generate
+  script:
+    - python3 -c "import jinja2, yaml"
+    - unset CHANGED_FILES_OVERRIDE FORGEJO_CHANGED_FILES CI_PIPELINE_FILES
+    - export CI_PIPELINE_FILES="$(python3 shared/scripts/changed_files.py)"
+    - python3 shared/scripts/generate_pipeline.py > generated.yml
+  artifacts:
+    paths:
+      - generated.yml
+    expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_MERGE_REQUEST_TARGET_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_MERGE_REQUEST_IID'
+
+services-pipeline:
+  stage: services
+  trigger:
+    include:
+      - artifact: generated.yml
+        job: generate-pipeline
+    strategy: depend
+    forward:
+      pipeline_variables: true
+      yaml_variables: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_MERGE_REQUEST_TARGET_BRANCH'
+      changes:
+        - "**/*.tf"
+        - "**/*.yml"
+        - "**/*.yaml"
+        - "**/*.cfg"
+        - "**/*.json"
+        - "**/*.sh"
+        - "shared/scripts/**"
+        - "shared/templates/**"
+        - "services/*/terraform/**"
+    - if: '$CI_MERGE_REQUEST_IID'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+docker_manual:
+  stage: generate
+  when: manual
+  allow_failure: true
+  trigger:
+    include:
+      - 'shared/pipelines/docker_registry_utils.yaml'
+    strategy: depend
+    forward:
+      pipeline_variables: true
+      yaml_variables: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+terraform_state_migration:
+  stage: generate
+  when: manual
+  allow_failure: true
+  trigger:
+    include:
+      - 'shared/pipelines/terraform_state_migration.yaml'
+    strategy: depend
+    forward:
+      pipeline_variables: true
+      yaml_variables: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'

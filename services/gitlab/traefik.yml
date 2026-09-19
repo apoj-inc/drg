@@ -1,0 +1,12 @@
+---
+http:
+  - name: gitlab
+    host: "git.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 80
+    middlewares:
+      - secure-headers
+      - rate-limit
+tcp:
+  - name: gitlab-ssh
+    listen_port: 2222
+    backend_port: 2222

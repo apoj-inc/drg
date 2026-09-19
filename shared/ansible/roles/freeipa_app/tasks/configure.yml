@@ -1,0 +1,275 @@
+---
+- name: Remove loopback entries for the native FreeIPA hostname
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: >-
+      ^[ \t]*(?:127\.0\.0\.1|::1)[ \t]+.*
+      (?:{{ freeipa_hostname | regex_escape }}|{{ (freeipa_hostname.split('.')[0]) | regex_escape }})(?:[ \t]|$).*$
+    state: absent
+
+- name: Remove link-local IPv6 entries for the native FreeIPA hostname
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: >-
+      ^[ \t]*fe80:[^ \t]+[ \t]+.*
+      (?:{{ freeipa_hostname | regex_escape }}|{{ (freeipa_hostname.split('.')[0]) | regex_escape }})(?:[ \t]|$).*$
+    state: absent
+
+- name: Ensure the native FreeIPA hostname maps to its primary IP locally
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ freeipa_ip_address | regex_escape }}\s+'
+    # Do not add the short hostname: FreeIPA validates reverse lookup results
+    # during replica installation and rejects the short alias as incorrect.
+    line: "{{ freeipa_ip_address }} {{ freeipa_hostname }}"
+    state: present
+
+- name: Resolve the native FreeIPA hostname to the configured primary IP
+  ansible.builtin.command:
+    argv:
+      - getent
+      - ahostsv4
+      - "{{ freeipa_hostname }}"
+  register: freeipa_hostname_resolution
+  changed_when: false
+  retries: 5
+  delay: 2
+  until: >-
+    freeipa_ip_address in freeipa_hostname_resolution.stdout and
+    '127.0.0.1' not in freeipa_hostname_resolution.stdout
+
+- name: Check whether native FreeIPA is already installed
+  ansible.builtin.stat:
+    path: /etc/ipa/default.conf
+  register: freeipa_native_config
+
+- name: Check the existing native FreeIPA service state
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - is-active
+      - ipa.service
+  register: freeipa_existing_service_state
+  changed_when: false
+  failed_when: false
+  when: freeipa_native_config.stat.exists
+
+- name: Refuse to reuse an incomplete native FreeIPA installation
+  ansible.builtin.fail:
+    msg: >-
+      /etc/ipa/default.conf exists, but ipa.service is not active. The host
+      contains a partial or broken previous FreeIPA installation, so replica
+      installation was skipped. Clean this new replica explicitly with
+      'ipa-server-install --uninstall --unattended' or recreate the VM, then
+      rerun deployment. The role will not remove FreeIPA data automatically.
+  when:
+    - freeipa_native_config.stat.exists
+    - freeipa_existing_service_state.rc | default(1) | int != 0
+
+- name: Install the initial native FreeIPA server
+  ansible.builtin.command:
+    argv:
+      - ipa-server-install
+      - --unattended
+      - --hostname={{ freeipa_hostname }}
+      - --ip-address={{ freeipa_ip_address }}
+      - --domain={{ freeipa_domain }}
+      - --realm={{ freeipa_realm }}
+      - --ds-password={{ freeipa_directory_manager_password }}
+      - --admin-password={{ freeipa_admin_password }}
+      - --no-host-dns
+      - --no-ntp
+      - --skip-mem-check
+  when:
+    - freeipa_is_primary | bool
+    - not freeipa_native_config.stat.exists
+  register: freeipa_initial_install
+  changed_when: (freeipa_initial_install.rc | default(1) | int) == 0
+  failed_when: false
+  no_log: true
+
+- name: Report initial FreeIPA installer failure
+  ansible.builtin.fail:
+    msg: >-
+      ipa-server-install failed with rc={{ freeipa_initial_install.rc | default('unknown') }}.
+      stderr={{ freeipa_initial_install.stderr | default('') | trim }}
+      stdout={{ freeipa_initial_install.stdout | default('') | trim }}
+  when:
+    - freeipa_is_primary | bool
+    - not freeipa_native_config.stat.exists
+    - (freeipa_initial_install.rc | default(0) | int) != 0
+
+- name: Install a native FreeIPA replica
+  ansible.builtin.command:
+    argv:
+      - ipa-replica-install
+      - --unattended
+      - --server={{ freeipa_replica_source_host }}
+      - --principal=admin
+      - --admin-password={{ freeipa_admin_password }}
+      - --force-join
+      - --ip-address={{ freeipa_ip_address }}
+      - --domain={{ freeipa_domain }}
+      - --realm={{ freeipa_realm }}
+      - --no-host-dns
+      - --no-ntp
+      - --skip-conncheck
+      - --skip-mem-check
+      - --setup-ca
+  when:
+    - not freeipa_is_primary | bool
+    - not freeipa_native_config.stat.exists
+  register: freeipa_replica_install
+  changed_when: (freeipa_replica_install.rc | default(1) | int) == 0
+  failed_when: false
+  no_log: true
+
+- name: Report FreeIPA replica installer failure
+  ansible.builtin.fail:
+    msg: >-
+      ipa-replica-install failed with rc={{ freeipa_replica_install.rc | default('unknown') }}.
+      stderr={{ freeipa_replica_install.stderr | default('') | trim }}
+      stdout={{ freeipa_replica_install.stdout | default('') | trim }}
+  when:
+    - not freeipa_is_primary | bool
+    - not freeipa_native_config.stat.exists
+    - (freeipa_replica_install.rc | default(0) | int) != 0
+
+- name: Enable the native FreeIPA service
+  ansible.builtin.systemd:
+    name: ipa
+    state: started
+    enabled: true
+
+- name: Read the primary FreeIPA HTTP session key
+  ansible.builtin.slurp:
+    src: "{{ freeipa_httpd_session_key }}"
+  delegate_to: "{{ freeipa_replica_source_host.split('.')[0] }}"
+  register: freeipa_primary_httpd_session_key
+  no_log: true
+
+- name: Install the shared FreeIPA HTTP session key
+  ansible.builtin.copy:
+    content: "{{ freeipa_primary_httpd_session_key.content | b64decode }}"
+    dest: "{{ freeipa_httpd_session_key }}"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  notify: Restart FreeIPA HTTPD
+
+- name: Restore the FreeIPA HTTP session key SELinux context
+  ansible.builtin.command:
+    argv:
+      - restorecon
+      - -F
+      - "{{ freeipa_httpd_session_key }}"
+  changed_when: false
+  notify: Restart FreeIPA HTTPD
+
+- name: Check for the native FreeIPA Apache rewrite configuration
+  ansible.builtin.stat:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+  register: freeipa_httpd_rewrite_conf_stat
+  when: freeipa_web_alias | string | length > 0
+
+- name: Require the native FreeIPA Apache rewrite configuration
+  ansible.builtin.assert:
+    that:
+      - freeipa_httpd_rewrite_conf_stat.stat.exists
+    fail_msg: >-
+      FreeIPA Apache rewrite configuration was not found at
+      {{ freeipa_httpd_rewrite_conf }}; refusing to configure the web alias.
+  when: freeipa_web_alias | string | length > 0
+
+- name: Remove misplaced FreeIPA UI plugin rewrite rules
+  ansible.builtin.lineinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    regexp: '^[ \t]*RewriteRule[ \t]+\^/ipa/ui/js/freeipa/plugins\.js\$.*$'
+    state: absent
+  when: freeipa_web_alias | string | length > 0
+  notify: Reload FreeIPA HTTPD
+
+- name: Serve the FreeIPA UI plugin index through the WSGI endpoint
+  ansible.builtin.lineinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    regexp: '^[ \t]*RewriteRule[ \t]+\^/ipa/ui/js/freeipa/plugins\.js\$[ \t]+'
+    line: '    RewriteRule ^/ipa/ui/js/freeipa/plugins\.js$ /ipa/wsgi/plugins.py [PT,L]'
+    insertafter: '^\s*RewriteEngine\s+on\s*$'
+    state: present
+  when: freeipa_web_alias | string | length > 0
+  notify: Reload FreeIPA HTTPD
+
+- name: Prevent Windows browsers from showing a Negotiate credential popup
+  ansible.builtin.lineinfile:
+    path: /etc/httpd/conf.d/ipa.conf
+    regexp: '^\s*BrowserMatch\s+Windows\s+gssapi-no-negotiate\s*$'
+    line: 'BrowserMatch Windows gssapi-no-negotiate'
+    insertafter: EOF
+    state: present
+  when: freeipa_disable_windows_browser_negotiate | bool
+  notify: Reload FreeIPA HTTPD
+
+- name: Serve the FreeIPA UI from the public alias without an external redirect
+  ansible.builtin.lineinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    regexp: '^[ \t]*RewriteRule[ \t]+\^/\$[ \t]+https://'
+    line: '    RewriteRule ^/?$ /ipa/ui/ [L,NC,PT]'
+    firstmatch: true
+  when:
+    - freeipa_web_alias | string | length > 0
+    - (freeipa_web_alias | string) != (freeipa_hostname | string)
+  notify: Reload FreeIPA HTTPD
+
+- name: Remove the obsolete managed FreeIPA alias root redirect block
+  ansible.builtin.blockinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    marker: '# {mark} ANSIBLE MANAGED FREEIPA ALIAS UI REDIRECT'
+    state: absent
+  when: freeipa_web_alias | string | length > 0
+  notify: Reload FreeIPA HTTPD
+
+- name: Allow the FreeIPA web alias in the canonical-host redirect
+  ansible.builtin.lineinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    regexp: '^[ \t]*RewriteCond[ \t]+%\{HTTP_HOST\}[ \t]+!'
+    line: '    RewriteCond %{HTTP_HOST} !^({{ freeipa_hostname | regex_escape }}|{{ freeipa_web_alias | regex_escape }})(?::[0-9]+)?$ [NC]'
+    firstmatch: true
+  when: freeipa_web_alias | string | length > 0
+  notify: Reload FreeIPA HTTPD
+
+- name: Remove the native FreeIPA HTTPS canonical-host redirect
+  ansible.builtin.lineinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    regexp: '^[ \t]*RewriteRule[ \t]+\^/\(\.\*\)[ \t]+https://'
+    state: absent
+    firstmatch: true
+  when: freeipa_web_alias | string | length > 0
+  notify: Reload FreeIPA HTTPD
+
+- name: Remove the native FreeIPA HTTP canonical-host redirect
+  ansible.builtin.lineinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    regexp: '^[ \t]*RewriteRule[ \t]+\^/\(\.\*\)[ \t]+http://'
+    state: absent
+    firstmatch: true
+  when: freeipa_web_alias | string | length > 0
+  notify: Reload FreeIPA HTTPD
+
+- name: Rewrite the FreeIPA alias referer to the native replica hostname
+  ansible.builtin.lineinfile:
+    path: "{{ freeipa_httpd_rewrite_conf }}"
+    regexp: '^[ \t]*RequestHeader[ \t]+edit[ \t]+Referer[ \t]+'
+    line: >-
+      RequestHeader edit Referer ^https://{{ freeipa_web_alias | regex_escape }}/
+      https://{{ freeipa_hostname }}/
+    insertafter: BOF
+  when:
+    - freeipa_web_alias | string | length > 0
+    - (freeipa_web_alias | string) != (freeipa_hostname | string)
+  notify: Reload FreeIPA HTTPD
+
+- name: Validate the native FreeIPA Apache configuration
+  ansible.builtin.command: httpd -t
+  changed_when: false
+  when: freeipa_web_alias | string | length > 0

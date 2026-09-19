@@ -1,0 +1,82 @@
+---
+service:
+  name: gitlab-runner
+  topology: replicated
+  description: GitLab Runner application service.
+  tags:
+    - opentofu
+    - gitlab-runner
+
+rollout:
+  by_contour: true
+
+startup:
+  order: 170
+
+logging:
+  journal_units:
+    - gitlab-runner
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1102
+      B:
+        start: 1101
+
+compute:
+  cpu_cores: 4
+  memory_mb: 8096
+  swap_mb: 1024
+  disk_gb: 30
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      dns_name_pattern: gitlab-runner-%{cluster}-%{contour}-%02d
+      role: app
+      ansible_primary: true
+
+dns:
+  canonical_name: runners.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: direct
+    publish_after_healthcheck: true
+    direct:
+      record_type: A
+
+gitlab_runner:
+  executor: shell
+  run_untagged: true
+  registration:
+    type: instance_type
+    delegate_host: gitlab
+    gitlab_url: https://git.example.test
+  rollout:
+    runner_tags:
+      A:
+        - rollout-target-b
+      B:
+        - rollout-target-a
+
+freeipa_client:
+  hostgroups: [service-gitlab-runner]

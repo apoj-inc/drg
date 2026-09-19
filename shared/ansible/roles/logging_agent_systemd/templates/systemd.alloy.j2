@@ -1,0 +1,41 @@
+declare "journal" {
+  argument "write_to" {
+    optional = false
+  }
+
+  loki.relabel "journal" {
+    forward_to = []
+
+    rule {
+      source_labels = ["__journal__systemd_unit"]
+      regex         = `{{ logging_agent_journal_unit_names | map('regex_escape') | join('|') }}`
+      action        = "keep"
+    }
+
+    rule {
+      source_labels = ["__journal__systemd_unit"]
+      target_label  = "unit"
+    }
+
+    rule {
+      source_labels = ["__journal_priority_keyword"]
+      target_label  = "level"
+    }
+
+    rule {
+      source_labels = ["__journal_syslog_identifier"]
+      target_label  = "syslog_identifier"
+    }
+  }
+
+  loki.source.journal "systemd" {
+    forward_to    = argument.write_to.value
+    relabel_rules = loki.relabel.journal.rules
+    max_age       = "{{ logging_agent_journal_max_age }}"
+
+    labels = {
+      source = "journal",
+      host   = "{{ inventory_hostname }}",
+    }
+  }
+}

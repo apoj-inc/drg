@@ -1,0 +1,10 @@
+collect_garbage:
+  stage: {{ job.stage }}
+  environment:
+    name: $ENVIRONMENT/docker
+  script:
+    - ansible-playbook services/dockerhub/ansible/dockerhub.yml
+      --tags "collect-garbage"
+  {% if job.when %}
+  when: "{{ job.when }}"
+  {% endif %}

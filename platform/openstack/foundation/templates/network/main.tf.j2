@@ -1,0 +1,33 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+data "openstack_identity_project_v3" "project" {
+  name = {{ config.project_name | tf_string }}
+}
+
+data "openstack_networking_network_v2" "external" {
+  # The provider network is created by Kolla/Neutron.  Creating another flat
+  # network on the same physical network causes FlatNetworkInUse (409).
+  name = {{ config.network.external.name | tf_string }}
+  external = true
+}
+
+module "tenant" {
+  source = "../../../../../../shared/terraform/openstack_network"
+
+  name       = {{ config.network.tenant.name | tf_string }}
+  project_id = data.openstack_identity_project_v3.project.id
+  mtu        = {{ config.network.tenant.mtu }}
+  subnet = {
+    name            = "{{ config.network.tenant.name }}-subnet"
+    cidr            = {{ config.network.tenant.cidr | tf_string }}
+    gateway_ip      = {{ config.network.tenant.gateway_ip | tf_string }}
+    dns_nameservers = {{ config.network.tenant.dns_nameservers | tf_value }}
+    enable_dhcp     = true
+  }
+  router = {
+    name                = {{ config.network.tenant.router_name | tf_string }}
+    external_network_id = data.openstack_networking_network_v2.external.id
+    enable_snat         = true
+  }
+}

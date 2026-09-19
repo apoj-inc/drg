@@ -1,0 +1,39 @@
+---
+- name: Install Traefik prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Configure Traefik
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Run Traefik Compose lifecycle
+  ansible.builtin.import_role:
+    name: compose_app
+  vars:
+    compose_app_name: traefik
+    compose_app_root: "{{ traefik_compose_dir }}"
+
+- name: Restart Traefik explicitly
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: restart.yml
+  vars:
+    compose_app_root: "{{ traefik_compose_dir }}"
+  tags:
+    - never
+    - restart
+
+- name: Reload Traefik explicitly
+  ansible.builtin.import_tasks: reload.yml
+  tags:
+    - never
+    - reload
+
+- name: Check Traefik health
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck

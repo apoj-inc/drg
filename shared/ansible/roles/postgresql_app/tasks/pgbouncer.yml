@@ -1,0 +1,132 @@
+---
+- name: Disable default PgBouncer service
+  ansible.builtin.service:
+    name: pgbouncer
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Ensure PgBouncer configuration directory exists
+  ansible.builtin.file:
+    path: /etc/pgbouncer
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0750"
+
+- name: Install PgBouncer systemd instance unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/pgbouncer@.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=PgBouncer instance %i
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=postgres
+      Group=postgres
+      ExecStart=/usr/sbin/pgbouncer /etc/pgbouncer/%i.ini
+      ExecReload=/bin/kill -HUP $MAINPID
+      KillSignal=SIGINT
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Reload systemd
+
+- name: Write PgBouncer primary configuration
+  ansible.builtin.copy:
+    dest: /etc/pgbouncer/primary.ini
+    owner: postgres
+    group: postgres
+    mode: "0640"
+    content: |
+      [databases]
+      * = host=127.0.0.1 port={{ postgresql_port }}
+
+      [pgbouncer]
+      listen_addr = {{ postgresql_pgbouncer_listen_address }}
+      listen_port = {{ postgresql_pgbouncer_port }}
+      auth_type = scram-sha-256
+      auth_file = /etc/pgbouncer/userlist.txt
+      admin_users = postgres
+      stats_users = postgres
+      pool_mode = {{ postgresql_pgbouncer_pool_mode }}
+      max_client_conn = {{ postgresql_pgbouncer_max_client_conn }}
+      default_pool_size = {{ postgresql_pgbouncer_default_pool_size }}
+      reserve_pool_size = {{ postgresql_pgbouncer_reserve_pool_size }}
+      server_reset_query = {{ postgresql_pgbouncer_server_reset_query }}
+      ignore_startup_parameters = extra_float_digits
+      server_tls_sslmode = prefer
+      client_tls_sslmode = disable
+      logfile = /var/log/postgresql/pgbouncer-primary.log
+      pidfile = /var/run/postgresql/pgbouncer-primary.pid
+  notify: Reload active PgBouncer primary
+
+- name: Write PgBouncer userlist
+  ansible.builtin.copy:
+    dest: /etc/pgbouncer/userlist.txt
+    owner: postgres
+    group: postgres
+    mode: "0600"
+    content: |
+      {% set pgbouncer_users = [
+        {'owner': 'postgres', 'password': postgresql_admin_password},
+        {'owner': postgresql_prometheus_user, 'password': postgresql_prometheus_password}
+      ] + postgresql_databases %}
+      {% for user in pgbouncer_users | unique(attribute='owner') %}
+      {{ user.owner | to_json }} {{ user.password | to_json }}
+      {% endfor %}
+  no_log: true
+  notify: Reload active PgBouncer primary
+
+- name: Install PgBouncer Patroni role callback
+  ansible.builtin.copy:
+    dest: /usr/local/sbin/patroni-pgbouncer-role
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+
+      role="${2:-unknown}"
+      systemctl_cmd="/usr/bin/systemctl"
+      if [ "$(id -u)" -eq 0 ]; then
+        run_systemctl="$systemctl_cmd"
+      else
+        run_systemctl="sudo -n $systemctl_cmd"
+      fi
+
+      case "$role" in
+        primary|master)
+          $run_systemctl start pgbouncer@primary.service
+          ;;
+        replica)
+          $run_systemctl stop pgbouncer@primary.service || true
+          ;;
+        *)
+          $run_systemctl stop pgbouncer@primary.service || true
+          ;;
+      esac
+
+- name: Allow Patroni to control primary PgBouncer service
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/patroni-pgbouncer
+    owner: root
+    group: root
+    mode: "0440"
+    content: |
+      postgres ALL=(root) NOPASSWD: /usr/bin/systemctl start pgbouncer@primary.service, /usr/bin/systemctl stop pgbouncer@primary.service, /usr/bin/systemctl restart pgbouncer@primary.service
+    validate: visudo -cf %s
+
+- name: Keep primary PgBouncer instance disabled at boot
+  ansible.builtin.systemd_service:
+    name: pgbouncer@primary.service
+    enabled: false
+    daemon_reload: true

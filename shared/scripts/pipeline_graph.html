@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DRG pipeline graph</title>
+  <style>
+    :root { color-scheme: dark; --bg:#111827; --panel:#1f2937; --muted:#9ca3af; --line:#4b5563; --active:#2563eb; --skip:#4b5563; --error:#dc2626; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:14px/1.45 system-ui,sans-serif; background:var(--bg); color:#f9fafb; }
+    header { padding:18px 24px; border-bottom:1px solid var(--line); }
+    h1 { margin:0 0 4px; font-size:21px; }
+    header p { margin:0; color:var(--muted); }
+    main { display:grid; grid-template-columns:300px minmax(0,1fr) 320px; min-height:calc(100vh - 80px); }
+    aside, section { padding:18px; border-right:1px solid var(--line); }
+    section { min-width:0; }
+    label { display:block; margin:0 0 12px; color:var(--muted); }
+    select, input, textarea, button { width:100%; border:1px solid var(--line); border-radius:6px; background:#111827; color:#f9fafb; padding:8px; font:inherit; }
+    textarea { min-height:145px; resize:vertical; }
+    button { background:var(--active); border:0; cursor:pointer; font-weight:600; }
+    button:hover { filter:brightness(1.15); }
+    .hint { color:var(--muted); font-size:12px; }
+    #summary { margin-bottom:12px; color:var(--muted); }
+    #diagnostics { margin-bottom:12px; }
+    .diagnostic { padding:8px 10px; margin:5px 0; border-left:3px solid var(--active); background:var(--panel); }
+    .diagnostic.warning { border-color:#d97706; }
+    .diagnostic.error { border-color:var(--error); }
+    #canvas { overflow:auto; border:1px solid var(--line); border-radius:8px; background:#0b1220; min-height:550px; }
+    svg { display:block; min-width:760px; min-height:520px; }
+    .edge { stroke:#64748b; stroke-width:2; marker-end:url(#arrow); }
+    .node { cursor:pointer; }
+    .node rect { stroke-width:2; rx:9; }
+    .node.active rect { fill:#172554; stroke:var(--active); }
+    .node.skipped rect { fill:#1f2937; stroke:var(--skip); stroke-dasharray:5 4; }
+    .node.error rect { fill:#450a0a; stroke:var(--error); }
+    .node text { pointer-events:none; }
+    .node .title { font-weight:700; }
+    .node .meta { fill:var(--muted); font-size:12px; }
+    h2 { margin:0 0 12px; font-size:16px; }
+    #details { white-space:pre-wrap; overflow-wrap:anywhere; color:#d1d5db; }
+    .step { padding:7px 0; border-bottom:1px solid #374151; }
+    .step strong { color:#fff; }
+    code { color:#bfdbfe; }
+    @media (max-width:1000px) { main { grid-template-columns:260px minmax(0,1fr); } main > aside:last-child { grid-column:1 / -1; border-top:1px solid var(--line); border-right:0; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>DRG effective Woodpecker pipeline</h1>
+    <p>Read-only graph of the configuration generated for the selected event and changed files.</p>
+  </header>
+  <main>
+    <aside>
+      <label>Event
+        <select id="event">
+          <option value="push">push</option>
+          <option value="pull_request">pull_request</option>
+          <option value="deployment">deployment</option>
+        </select>
+      </label>
+      <label>Branch
+        <input id="branch" value="drunk">
+      </label>
+      <label>Deployment target
+        <input id="target" placeholder="service:cluster:contour">
+      </label>
+      <label>Changed files
+        <textarea id="files">ci/dagger/src/drg_ci/__init__.py</textarea>
+      </label>
+      <button id="refresh">Build graph</button>
+      <p class="hint">One repository-relative path per line. This tool does not execute jobs or modify files.</p>
+    </aside>
+    <section>
+      <div id="summary">Loading…</div>
+      <div id="diagnostics"></div>
+      <div id="canvas"><svg id="graph" role="img" aria-label="Pipeline graph"></svg></div>
+    </section>
+    <aside>
+      <h2>Details</h2>
+      <div id="details">Select a workflow node.</div>
+    </aside>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    let currentGraph = null;
+    const ns = 'http://www.w3.org/2000/svg';
+    function svg(tag, attrs = {}) { const el = document.createElementNS(ns, tag); Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k,v)); return el; }
+    function files() { return $('files').value.split(/\r?\n/).map(x => x.trim()).filter(Boolean); }
+    function workflowNodes(graph) { return graph.nodes.filter(n => n.kind === 'workflow'); }
+    function graphLayers(nodes, edges) {
+      const incoming = new Map(nodes.map(n => [n.id, []]));
+      edges.filter(e => e.kind === 'workflow').forEach(e => { if (incoming.has(e.to)) incoming.get(e.to).push(e.from); });
+      const layers = new Map();
+      function depth(id, visiting = new Set()) {
+        if (layers.has(id)) return layers.get(id);
+        if (visiting.has(id)) return 0;
+        visiting.add(id);
+        const value = Math.max(-1, ...(incoming.get(id) || []).map(depth)) + 1;
+        layers.set(id, value); return value;
+      }
+      nodes.forEach(n => depth(n.id));
+      return layers;
+    }
+    function showDetails(node) {
+      if (!node) return;
+      if (node.kind === 'step') {
+        $('details').innerHTML = `<strong>${escapeHtml(node.label)}</strong><br>Workflow: <code>${escapeHtml(node.workflow)}</code><br>Image: <code>${escapeHtml(node.image || 'default')}</code><br><br>Depends on: ${escapeHtml((currentGraph.nodes.find(n => n.id === 'workflow:' + node.workflow)?.steps || []).find(s => s.name === node.label)?.depends_on.join(', ') || 'none')}`;
+        return;
+      }
+      const matrix = node.matrix.length ? '\nMatrix:\n' + node.matrix.map(x => JSON.stringify(x)).join('\n') : '';
+      const steps = node.steps.length ? '\nSteps:\n' + node.steps.map(s => `  ${s.name}${s.depends_on.length ? ' ← ' + s.depends_on.join(', ') : ''}`).join('\n') : '';
+      $('details').textContent = `${node.label}\nStatus: ${node.status}${node.reason ? '\nReason: ' + node.reason : ''}\nDepends on: ${node.depends_on.join(', ') || 'none'}${matrix}${steps}`;
+    }
+    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function render(graph) {
+      currentGraph = graph;
+      const nodes = workflowNodes(graph), edges = graph.edges.filter(e => e.kind === 'workflow');
+      const layers = graphLayers(nodes, edges), groups = new Map();
+      nodes.forEach(n => { const layer = layers.get(n.id) || 0; if (!groups.has(layer)) groups.set(layer, []); groups.get(layer).push(n); });
+      const width = Math.max(760, groups.size * 230 + 80), height = Math.max(520, Math.max(1, ...Array.from(groups.values()).map(x => x.length)) * 135 + 80);
+      const positions = new Map();
+      groups.forEach((group, layer) => group.forEach((node, row) => positions.set(node.id, {x:50 + layer * 220, y:45 + row * 135})));
+      const graphSvg = $('graph'); graphSvg.replaceChildren(); graphSvg.setAttribute('viewBox', `0 0 ${width} ${height}`); graphSvg.setAttribute('width', width); graphSvg.setAttribute('height', height);
+      const defs = svg('defs'), marker = svg('marker', {id:'arrow', markerWidth:8, markerHeight:8, refX:7, refY:3, orient:'auto'}); marker.append(svg('path', {d:'M0,0 L0,6 L7,3 z', fill:'#64748b'})); defs.append(marker); graphSvg.append(defs);
+      edges.forEach(edge => { const a=positions.get(edge.from), b=positions.get(edge.to); if (!a || !b) return; graphSvg.append(svg('line', {class:'edge', x1:a.x+180, y1:a.y+42, x2:b.x, y2:b.y+42})); });
+      nodes.forEach(node => { const p=positions.get(node.id), group=svg('g', {class:`node ${node.status}`}); const rect=svg('rect', {x:p.x,y:p.y,width:180,height:90}); group.append(rect); const title=svg('text',{class:'title',x:p.x+10,y:p.y+23}); title.textContent=node.label; group.append(title); const meta=svg('text',{class:'meta',x:p.x+10,y:p.y+43}); meta.textContent=node.status === 'active' ? (node.matrix.length ? `${node.matrix.length} matrix target(s)` : node.kind) : node.reason || 'skipped'; group.append(meta); const stepMeta=svg('text',{class:'meta',x:p.x+10,y:p.y+66}); stepMeta.textContent=node.steps?.length ? node.steps.map(s => s.depends_on.length ? `${s.name} ← ${s.depends_on.join(',')}` : s.name).join(' → ') : ''; group.append(stepMeta); group.addEventListener('click', () => showDetails(node)); graphSvg.append(group); });
+      $('summary').textContent = `${nodes.filter(n => n.status === 'active').length} active workflow(s), ${nodes.filter(n => n.status === 'skipped').length} skipped candidate(s), ${graph.job_count} generated execution job(s).`;
+      $('diagnostics').replaceChildren(...(graph.diagnostics || []).map(d => { const el=document.createElement('div'); el.className=`diagnostic ${d.level}`; el.textContent=d.message; return el; }));
+      showDetails(nodes.find(n => n.id === 'workflow:validate') || nodes[0]);
+    }
+    async function refresh() {
+      $('summary').textContent = 'Building graph…';
+      const response = await fetch('/api/graph', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({event:$('event').value, branch:$('branch').value, deployment_target:$('target').value, changed_files:files()})});
+      const data = await response.json();
+      if (!response.ok) { $('diagnostics').textContent = data.error || 'Graph request failed'; return; }
+      render(data);
+    }
+    $('refresh').addEventListener('click', refresh);
+    $('event').addEventListener('change', () => { $('target').disabled = $('event').value !== 'deployment'; if ($('event').value === 'deployment') $('target').focus(); refresh(); });
+    $('target').disabled = true;
+    refresh();
+  </script>
+</body>
+</html>

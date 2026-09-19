@@ -1,0 +1,8 @@
+---
+local_data_disk_device: /dev/sdb
+local_data_disk_mountpoint: ""
+local_data_disk_filesystem: ext4
+local_data_disk_mount_options: defaults,noatime
+local_data_disk_owner: root
+local_data_disk_group: root
+local_data_disk_mode: "0755"

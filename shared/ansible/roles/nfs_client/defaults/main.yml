@@ -1,0 +1,9 @@
+---
+nfs_client_server: ""
+nfs_client_export: ""
+nfs_client_mountpoint: ""
+nfs_client_mount_options: "vers=4,hard,_netdev,noatime"
+nfs_client_owner: root
+nfs_client_group: root
+nfs_client_mode: "0755"
+nfs_client_validate_xattrs: true

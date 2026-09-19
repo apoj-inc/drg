@@ -1,0 +1,33 @@
+---
+forgejo_runner_version: "13.0.0"
+forgejo_runner_arch: amd64
+forgejo_runner_binary_name: "forgejo-runner-{{ forgejo_runner_version }}-linux-{{ forgejo_runner_arch }}"
+forgejo_runner_binary_url: "https://code.forgejo.org/forgejo/runner/releases/download/v{{ forgejo_runner_version }}/{{ forgejo_runner_binary_name }}"
+forgejo_runner_binary_path: /usr/local/bin/forgejo-runner
+forgejo_runner_download_path: "/tmp/{{ forgejo_runner_binary_name }}"
+forgejo_runner_config_path: /home/runner/runner-config.yml
+forgejo_runner_registration_marker_path: /home/runner/.forgejo-runner-registration-v2
+forgejo_runner_registration_secret_path: /home/runner/.forgejo-runner-secret
+forgejo_runner_home: /home/runner
+forgejo_runner_user: runner
+forgejo_runner_group: runner
+forgejo_runner_server_url: https://forge.example.test/
+forgejo_runner_registration_secret_override: ""
+forgejo_runner_registration_delegate_host_override: ""
+forgejo_runner_registration_delegate_host: ""
+forgejo_runner_registration_compose_file: /opt/forgejo/docker-compose.yml
+forgejo_runner_registration_service: forgejo
+forgejo_runner_name: "{{ inventory_hostname }}"
+forgejo_runner_scope: example-org/drg
+forgejo_runner_labels:
+  - forgejo-host:host
+forgejo_runner_capacity: 8
+opentofu_version: "1.12.3"
+opentofu_arch: amd64
+opentofu_deb_name: "tofu_{{ opentofu_version }}_{{ opentofu_arch }}.deb"
+opentofu_deb_url: "https://github.com/opentofu/opentofu/releases/download/v{{ opentofu_version }}/{{ opentofu_deb_name }}"
+opentofu_deb_path: "/tmp/{{ opentofu_deb_name }}"
+opentofu_deb_checksum: ""
+opentofu_provider_mirror_url: "https://terraform-mirror.yandexcloud.net/"
+opentofu_provider_mirror_include:
+  - "registry.opentofu.org/*/*"

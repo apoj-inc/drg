@@ -1,0 +1,15 @@
+approve-traefik:
+  stage: traefik_approve
+  environment:
+    name: "{{ deploy_environment }}/traefik"
+    action: prepare
+  script:
+    - echo "Approve Traefik configuration for {{ deploy_environment }}"
+  when: manual
+  allow_failure: false
+  needs:
+    - job: preview:traefik
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

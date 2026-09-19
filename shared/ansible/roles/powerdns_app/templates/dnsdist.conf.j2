@@ -1,0 +1,17 @@
+setLocal("{{ powerdns_dnsdist_listen_address }}:{{ powerdns_dnsdist_dns_port }}")
+setACL({
+{% for cidr in powerdns_allowed_cidrs %}
+  "{{ cidr }}"{% if not loop.last %},{% endif %}
+{% endfor %}
+})
+
+{% for host in groups[powerdns_dnsdist_peer_group] | default([]) | sort %}
+{% set backend_address = hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) %}
+{% if backend_address %}
+newServer({address="{{ backend_address }}:{{ powerdns_dns_port }}", name="{{ host }}-auth", pool="authoritative"})
+newServer({address="{{ backend_address }}:{{ powerdns_recursor_dns_port }}", name="{{ host }}-recursor", pool="recursor"})
+{% endif %}
+{% endfor %}
+
+addAction(QNameSuffixRule("{{ powerdns_local_zone | trim('.') }}."), PoolAction("authoritative"))
+addAction(AllRule(), PoolAction("recursor"))

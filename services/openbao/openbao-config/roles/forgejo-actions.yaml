@@ -1,0 +1,5 @@
+---
+auth_mount: forgejo-actions
+name: ci
+policy: ci
+purpose: Forgejo Actions OIDC role.

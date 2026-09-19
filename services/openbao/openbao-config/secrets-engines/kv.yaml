@@ -1,0 +1,6 @@
+---
+mount: kv
+type: kv
+description: Versioned static secrets for CI and future service consumers.
+options:
+  version: "2"

@@ -1,0 +1,22 @@
+validate:traefik-routes:
+  stage: validate
+  variables:
+    ANSIBLE_HOST_PATTERN_MISMATCH: warning
+  cache:
+    key:
+      files:
+        - shared/ansible/collections/requirements.yml
+    paths:
+      - .ansible/collections/
+      - .terraform.d/plugin-cache/
+    policy: pull-push
+  script:
+    - command -v ansible-playbook
+    - mkdir -p "$TF_PLUGIN_CACHE_DIR"
+    - ansible-galaxy collection install -r shared/ansible/collections/requirements.yml --collections-path .ansible/collections
+    - export ANSIBLE_COLLECTIONS_PATH="${CI_PROJECT_DIR}/.ansible/collections:/usr/share/ansible/collections"
+    - ansible-playbook -i 'localhost,' services/traefik/ansible/traefik-config.yml --syntax-check
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

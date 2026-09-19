@@ -1,0 +1,11 @@
+---
+dns_sync_managed_record_types:
+  - A
+  - AAAA
+  - CNAME
+  - MX
+  - TXT
+  - SRV
+dns_sync_generate_ptr: "{{ lookup('env', 'DNS_SYNC_GENERATE_PTR') | default('true', true) | bool }}"
+dns_sync_default_ttl: "{{ lookup('env', 'DNS_SYNC_DEFAULT_TTL') | default('300', true) | int }}"
+dns_sync_default_nameservers: "{{ (lookup('env', 'DNS_SYNC_DEFAULT_NAMESERVERS') | default('ns1.corp.local.', true)).split(',') | map('trim') | reject('equalto', '') | list }}"

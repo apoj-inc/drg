@@ -1,0 +1,7 @@
+---
+stages:
+  - manual
+
+{% for job in jobs %}
+{% include job.template %}
+{% endfor %}

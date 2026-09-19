@@ -1,0 +1,89 @@
+---
+http:
+  middlewares:
+    bentopdf-secure-headers:
+      headers:
+        customResponseHeaders:
+          Cross-Origin-Opener-Policy: same-origin
+          Cross-Origin-Embedder-Policy: require-corp
+
+    authentik-auth:
+      forwardAuth:
+        address: "{{ authentik_url }}/outpost.goauthentik.io/auth/traefik"
+        authResponseHeaders:
+          - X-authentik-username
+          - X-authentik-groups
+          - X-authentik-entitlements
+          - X-authentik-email
+          - X-authentik-name
+          - X-authentik-uid
+          - X-authentik-jwt
+          - X-authentik-meta-jwks
+          - X-authentik-meta-outpost
+          - X-authentik-meta-provider
+          - X-authentik-meta-app
+          - X-authentik-meta-version
+
+    keycloak-auth:
+      forwardAuth:
+        address: https://oauth2.example.test/
+        trustForwardHeader: true
+        authRequestHeaders:
+          - Accept
+          - Cookie
+          - X-Forwarded-For
+          - X-Forwarded-Host
+          - X-Forwarded-Proto
+          - X-Forwarded-Uri
+        authResponseHeaders:
+          - X-Auth-Request-User
+          - X-Auth-Request-Preferred-Username
+          - X-Auth-Request-Email
+          - X-Auth-Request-Groups
+          - X-Auth-Request-Access-Token
+          - Authorization
+
+    lan-and-vpn-only:
+      ipAllowList:
+        sourceRange:
+          - 192.0.2.0/24
+          - 198.51.100.0/24
+          - 100.67.0.0/16
+          - 198.51.100.0/24
+          - 127.0.0.1/32
+
+    secured-chain:
+      chain:
+        middlewares:
+          - lan-and-vpn-only
+          - authentik-auth
+
+    keycloak-secured-chain:
+      chain:
+        middlewares:
+          - lan-and-vpn-only
+          - keycloak-auth
+
+    secure-headers:
+      headers:
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        customFrameOptionsValue: SAMEORIGIN
+        referrerPolicy: strict-origin-when-cross-origin
+        customResponseHeaders:
+          X-Robots-Tag: noindex, nofollow, nosnippet, noarchive
+
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1s
+
+    freeipa-host:
+      headers:
+        customRequestHeaders:
+          Host: ipa.example.test

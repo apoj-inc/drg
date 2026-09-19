@@ -1,0 +1,29 @@
+---
+{# Render one shared TCP route from the first Redis inventory host. #}
+{#
+  Use the inventory primary IP for backend addresses. Traefik runs with
+  network_mode=host and must not depend on the host resolver being able to
+  resolve the service-node names; the public Redis name already resolves to
+  this Traefik VIP.
+#}
+{% set redis_hosts = groups['all'] | select('match', '^redis-') | list | sort %}
+{% if (traefik_route_static_discovery | default(false) | bool) or (redis_hosts | length > 0 and (traefik_route_target_host | default(inventory_hostname)) == (redis_hosts | first)) %}
+tcp:
+  - name: redis
+    entrypoints:
+      - redis
+    listen_port: 6379
+    backend_addresses:
+{% for host in redis_hosts %}
+      - {{ hostvars[host].ansible_ip | default(hostvars[host].ansible_host, true) }}:6379
+{% endfor %}
+    health_check:
+      send: "AUTH redis-health probe\r\nROLE\r\n"
+      # AUTH returns +OK before ROLE returns the three-element master reply.
+      # Matching both responses prevents replicas from being selected while
+      # still allowing Traefik to authenticate the health-check connection.
+      expect: "+OK\r\n*3\r\n$6\r\nmaster\r\n"
+      interval: "1s"
+      unhealthyInterval: "1s"
+      timeout: "500ms"
+{% endif %}

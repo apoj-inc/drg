@@ -1,0 +1,38 @@
+platform:openstack:example:{{ job.phase }}:
+  stage: platform_{{ job.phase | replace('-', '_') }}
+  extends: .platform_configure
+{% set openbao_secret_job = "platform" %}
+{% include "openbao-secrets.yml.j2" %}
+  variables:
+    OPENSTACK_PLATFORM_PHASE: {{ job.phase }}
+{% if job.phase == "kolla-deploy" %}
+    PLATFORM_CACHE_POLICY: pull
+{% endif %}
+{% include "openbao-variables.yml.j2" %}
+{% if job.manual_apply %}
+  when: manual
+  allow_failure: false
+{% endif %}
+{% if job.platform_needs %}
+  needs:
+{% for dependency in job.platform_needs %}
+    - job: {{ dependency }}
+{% if job.phase == "foundation-apply" %}
+      artifacts: true
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if job.phase == "foundation-plan" %}
+  artifacts:
+    expire_in: 7 days
+    paths:
+{% for root in job.foundation_plan_artifacts %}
+      - {{ root }}/tfplan
+{% endfor %}
+{% endif %}
+  script:
+    - python3 shared/scripts/run_platform.py --phase "{{ job.phase }}"
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

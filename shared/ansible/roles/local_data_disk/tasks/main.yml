@@ -1,0 +1,82 @@
+---
+- name: Validate local data disk settings
+  ansible.builtin.assert:
+    that:
+      - local_data_disk_device | length > 0
+      - local_data_disk_mountpoint | length > 0
+      - local_data_disk_filesystem in ['ext4', 'xfs']
+    fail_msg: "A local data disk device, mountpoint, and supported filesystem are required."
+
+- name: Check local data disk exists
+  ansible.builtin.stat:
+    path: "{{ local_data_disk_device }}"
+  register: local_data_disk_device_stat
+
+- name: Refuse missing or non-block local data disk
+  ansible.builtin.assert:
+    that:
+      - local_data_disk_device_stat.stat.exists
+      - local_data_disk_device_stat.stat.isblk
+    fail_msg: "{{ local_data_disk_device }} must exist and be a block device."
+
+- name: Detect existing local data disk filesystem
+  ansible.builtin.command: "blkid -o value -s TYPE {{ local_data_disk_device }}"
+  register: local_data_disk_detected_filesystem
+  changed_when: false
+  failed_when: local_data_disk_detected_filesystem.rc not in [0, 2]
+
+- name: Refuse an unexpected local data disk filesystem
+  ansible.builtin.assert:
+    that:
+      - >-
+        (local_data_disk_detected_filesystem.stdout | trim | length == 0)
+        or
+        (local_data_disk_detected_filesystem.stdout | trim == local_data_disk_filesystem)
+    fail_msg: >-
+      {{ local_data_disk_device }} has filesystem
+      {{ local_data_disk_detected_filesystem.stdout | trim | default('unknown', true) }};
+      expected {{ local_data_disk_filesystem }}.
+
+- name: Create filesystem on a blank local data disk
+  community.general.filesystem:
+    dev: "{{ local_data_disk_device }}"
+    fstype: "{{ local_data_disk_filesystem }}"
+  when: local_data_disk_detected_filesystem.stdout | trim | length == 0
+
+- name: Check whether the local data disk mountpoint is already occupied
+  ansible.builtin.command: "findmnt --noheadings --output SOURCE --mountpoint {{ local_data_disk_mountpoint }}"
+  register: local_data_disk_existing_mount
+  changed_when: false
+  failed_when: local_data_disk_existing_mount.rc not in [0, 1]
+
+- name: Refuse to hide an existing non-local data mount
+  ansible.builtin.assert:
+    that:
+      - >-
+        (local_data_disk_existing_mount.stdout | trim | length == 0)
+        or
+        (local_data_disk_existing_mount.stdout | trim == local_data_disk_device)
+    fail_msg: >-
+      {{ local_data_disk_mountpoint }} is already mounted from
+      {{ local_data_disk_existing_mount.stdout | trim }}. Migrate and unmount
+      the old storage before enabling the local data disk.
+
+- name: Ensure local data disk mountpoint exists
+  ansible.builtin.file:
+    path: "{{ local_data_disk_mountpoint }}"
+    state: directory
+    owner: "{{ local_data_disk_owner }}"
+    group: "{{ local_data_disk_group }}"
+    mode: "{{ local_data_disk_mode }}"
+
+- name: Mount local data disk
+  ansible.posix.mount:
+    path: "{{ local_data_disk_mountpoint }}"
+    src: "{{ local_data_disk_device }}"
+    fstype: "{{ local_data_disk_filesystem }}"
+    opts: "{{ local_data_disk_mount_options }}"
+    state: mounted
+
+- name: Verify local data disk mount is active
+  ansible.builtin.command: "mountpoint -q {{ local_data_disk_mountpoint }}"
+  changed_when: false

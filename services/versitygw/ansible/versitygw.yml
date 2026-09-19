@@ -1,0 +1,51 @@
+---
+- name: Deploy VersityGW
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('versitygw', true) }}"
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../config.yaml
+  vars:
+    versitygw_image: "{{ versitygw.image }}:{{ versitygw.image_tag }}"
+    versitygw_port: "{{ versitygw.port }}"
+    versitygw_admin_port: "{{ versitygw.admin_port }}"
+    versitygw_data_dir: "{{ versitygw.data_dir }}"
+    versitygw_iam_dir: "{{ versitygw.iam_dir }}"
+    versitygw_versioning_dir: "{{ versitygw.versioning_dir }}"
+    versitygw_storage_mode: "{{ storage.mode }}"
+    nfs_client_server: "{{ storage.nfs.server }}"
+    nfs_client_export: "{{ storage.nfs.export }}"
+    nfs_client_mountpoint: "{{ storage.nfs.mountpoint }}"
+    nfs_client_mount_options: "{{ storage.nfs.mount_options }}"
+    local_data_disk_device: "{{ storage.local_disk.device }}"
+    local_data_disk_mountpoint: "{{ storage.local_disk.mountpoint }}"
+    local_data_disk_filesystem: "{{ storage.local_disk.filesystem }}"
+    local_data_disk_mount_options: "{{ storage.local_disk.mount_options }}"
+    versitygw_root_access_key: "{{ lookup('env', 'VERSITYGW_ROOT_ACCESS_KEY') }}"
+    versitygw_root_secret_key: "{{ lookup('env', 'VERSITYGW_ROOT_SECRET_KEY') }}"
+    versitygw_forgejo_access_key: "{{ lookup('env', 'FORGEJO_S3_ACCESS_KEY') }}"
+    versitygw_forgejo_secret_key: "{{ lookup('env', 'FORGEJO_S3_SECRET_KEY') }}"
+    versitygw_forgejo_bucket: "{{ versitygw.forgejo_bucket }}"
+    versitygw_grafana_access_key: "{{ lookup('env', 'GRAFANA_S3_ACCESS_KEY') }}"
+    versitygw_grafana_secret_key: "{{ lookup('env', 'GRAFANA_S3_SECRET_KEY') }}"
+    versitygw_grafana_bucket: "{{ versitygw.grafana_bucket }}"
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+    - name: Install and enable QEMU guest agent
+      ansible.builtin.apt:
+        name: qemu-guest-agent
+        state: present
+        update_cache: true
+    - ansible.builtin.service:
+        name: qemu-guest-agent
+        state: started
+        enabled: true
+  roles:
+    - docker_host
+    - role: nfs_client
+      when: versitygw_storage_mode == 'nfs'
+    - role: local_data_disk
+      when: versitygw_storage_mode == 'local_disk'
+    - role: versitygw_app
+    - monitoring_agent
+    - logging_agent

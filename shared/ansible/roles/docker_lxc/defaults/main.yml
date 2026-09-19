@@ -1,0 +1,9 @@
+---
+docker_lxc_storage_driver: overlay2
+docker_lxc_daemon_config_path: /etc/docker/daemon.json
+docker_lxc_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin

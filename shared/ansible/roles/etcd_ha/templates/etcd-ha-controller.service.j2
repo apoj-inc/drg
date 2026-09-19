@@ -1,0 +1,16 @@
+[Unit]
+Description={{ etcd_ha_controller_name }} etcd HA ownership controller
+After={{ etcd_ha_service_after | join(' ') }}
+Wants={{ etcd_ha_service_wants | join(' ') }}
+
+[Service]
+Type=simple
+EnvironmentFile={{ etcd_ha_controller_config_path }}
+ExecStart={{ etcd_ha_controller_path }}
+Restart=always
+RestartSec=3
+WorkingDirectory=/
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,240 @@
+---
+- name: Build Redis cluster host list
+  ansible.builtin.set_fact:
+    redis_cluster_hosts: "{{ groups['all'] | select('match', '^redis-') | list | sort }}"
+
+- name: Select initial Redis primary
+  ansible.builtin.set_fact:
+    redis_master_host: "{{ redis_cluster_hosts | first }}"
+    redis_master_address: >-
+      {{ hostvars[redis_cluster_hosts | first].ansible_ip
+         | default(hostvars[redis_cluster_hosts | first].ansible_host) }}
+
+- name: Validate Redis password
+  ansible.builtin.assert:
+    that:
+      - redis_password | string | length > 0
+    fail_msg: REDIS_PASSWORD is empty or was not loaded from OpenBao.
+
+- name: Validate Redis cluster inputs
+  ansible.builtin.assert:
+    that:
+      - redis_port | int > 0
+      - redis_sentinel_port | int > 0
+      - redis_quorum | int >= 2
+      - redis_cluster_hosts | length >= 1
+      - inventory_hostname in redis_cluster_hosts
+      - redis_master_host in hostvars
+      - (hostvars[redis_master_host].ansible_ip | default(hostvars[redis_master_host].ansible_host, true)) | default('') | string | length > 0
+    fail_msg: >-
+      Redis requires valid ports, at least one discovered inventory member, and
+      a reachable initial primary. Sentinel quorum checks remain deferred until
+      enough members are available.
+
+- name: Install Redis HA packages
+  ansible.builtin.apt:
+    name:
+      - redis-server
+      - redis-sentinel
+      - redis-tools
+    state: present
+    update_cache: true
+
+- name: Remove obsolete Redis HAProxy proxy
+  ansible.builtin.apt:
+    name: haproxy
+    state: absent
+
+- name: Remove obsolete Redis primary proxy units
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/haproxy/haproxy.cfg
+    - /usr/local/sbin/redis-primary-proxy
+    - /etc/systemd/system/redis-primary-proxy.service
+    - /etc/systemd/system/redis-primary-proxy.timer
+  notify: Reload systemd
+
+- name: Ensure Redis data directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: redis
+    group: redis
+    mode: "0750"
+  loop:
+    - "{{ redis_data_dir }}"
+    - "{{ redis_sentinel_data_dir }}"
+
+- name: Render Redis password file
+  ansible.builtin.copy:
+    dest: /etc/redis/redis-password
+    content: "{{ redis_password }}\n"
+    owner: root
+    group: redis
+    mode: "0640"
+  no_log: true
+  notify:
+    - Restart Redis
+    - Restart Redis Sentinel
+
+- name: Render Redis server configuration
+  ansible.builtin.template:
+    src: redis.conf.j2
+    dest: /etc/redis/redis.conf
+    owner: redis
+    group: redis
+    mode: "0640"
+  no_log: true
+  notify: Restart Redis
+
+- name: Check whether Redis Sentinel has been initialized
+  ansible.builtin.stat:
+    path: /etc/redis/.drg-sentinel-initialized
+  register: redis_sentinel_marker
+
+- name: Render initial Redis Sentinel configuration
+  ansible.builtin.template:
+    src: sentinel.conf.j2
+    dest: /etc/redis/sentinel.conf
+    owner: redis
+    group: redis
+    mode: "0640"
+  when: not redis_sentinel_marker.stat.exists
+  no_log: true
+  notify: Restart Redis Sentinel
+
+- name: Mark Redis Sentinel as initialized
+  ansible.builtin.file:
+    path: /etc/redis/.drg-sentinel-initialized
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  when: not redis_sentinel_marker.stat.exists
+
+- name: Apply Redis configuration before cluster initialization
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure Redis server is enabled and running
+  ansible.builtin.service:
+    name: redis-server
+    state: started
+    enabled: true
+
+- name: Wait for Redis authentication endpoint
+  ansible.builtin.command:
+    argv:
+      - redis-cli
+      - --raw
+      - -h
+      - 127.0.0.1
+      - -p
+      - "{{ redis_port | string }}"
+      - ping
+  environment:
+    REDISCLI_AUTH: "{{ redis_password }}"
+  register: redis_ping
+  changed_when: false
+  no_log: true
+  retries: 12
+  delay: 5
+  until: redis_ping.stdout | trim == 'PONG'
+
+- name: Check whether initial Redis replication has been configured
+  ansible.builtin.stat:
+    path: /etc/redis/.drg-replication-initialized
+  register: redis_replication_marker
+
+- name: Configure initial Redis replica
+  ansible.builtin.command:
+    argv:
+      - redis-cli
+      - --raw
+      - -h
+      - 127.0.0.1
+      - -p
+      - "{{ redis_port | string }}"
+      - REPLICAOF
+      - "{{ redis_master_address }}"
+      - "{{ redis_port | string }}"
+  environment:
+    REDISCLI_AUTH: "{{ redis_password }}"
+  when:
+    - inventory_hostname != redis_master_host
+    - not redis_replication_marker.stat.exists
+  register: redis_replica_config
+  changed_when: true
+  no_log: true
+
+- name: Mark initial Redis replication as configured
+  ansible.builtin.file:
+    path: /etc/redis/.drg-replication-initialized
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - inventory_hostname != redis_master_host
+    - redis_replica_config is changed
+
+- name: Ensure Redis Sentinel is enabled and running
+  ansible.builtin.service:
+    name: redis-sentinel
+    state: started
+    enabled: true
+
+- name: Probe Redis Sentinel members
+  ansible.builtin.command:
+    argv:
+      - redis-cli
+      - --raw
+      - -h
+      - "{{ hostvars[item].ansible_ip | default(hostvars[item].ansible_host, true) }}"
+      - -p
+      - "{{ redis_sentinel_port | string }}"
+      - PING
+  loop: "{{ redis_cluster_hosts }}"
+  loop_control:
+    label: "{{ item }}"
+  register: redis_sentinel_member_probes
+  changed_when: false
+  failed_when: false
+
+- name: Verify Redis Sentinel quorum when enough members are available
+  ansible.builtin.command:
+    argv:
+      - redis-cli
+      - --raw
+      - -h
+      - 127.0.0.1
+      - -p
+      - "{{ redis_sentinel_port | string }}"
+      - SENTINEL
+      - CKQUORUM
+      - "{{ redis_master_name }}"
+  register: redis_sentinel_quorum
+  changed_when: false
+  failed_when: redis_sentinel_quorum.rc != 0
+  when: >-
+    redis_sentinel_member_probes.results |
+    selectattr('stdout', 'search', 'PONG') |
+    list |
+    length >= redis_quorum | int
+
+- name: Verify local Redis role is reported
+  ansible.builtin.command:
+    argv:
+      - redis-cli
+      - --raw
+      - -h
+      - 127.0.0.1
+      - -p
+      - "{{ redis_port | string }}"
+      - ROLE
+  environment:
+    REDISCLI_AUTH: "{{ redis_password }}"
+  register: redis_role
+  changed_when: false
+  no_log: true

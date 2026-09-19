@@ -1,0 +1,3 @@
+---
+netbox_sdn_bootstrap_confirm: false
+netbox_sdn_bootstrap_seed_file: ""

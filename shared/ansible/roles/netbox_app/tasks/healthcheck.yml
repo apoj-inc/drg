@@ -1,0 +1,18 @@
+---
+- name: Check NetBox API health
+  ansible.builtin.uri:
+    url: "http://localhost:{{ netbox_http_port }}/api/"
+    method: GET
+    headers: "{{ ({'Authorization': 'Bearer ' ~ netbox_token, 'Accept': 'application/json'} if netbox_token is defined else {'Accept': 'application/json'}) }}"
+    status_code:
+      - 200
+      - 403
+    timeout: 30
+  register: netbox_api_health
+  changed_when: false
+  failed_when: >-
+    netbox_api_health.status != 200 and
+    (
+      netbox_api_health.status != 403 or
+      netbox_api_health.json.detail | default('') != 'Authentication credentials were not provided.'
+    )

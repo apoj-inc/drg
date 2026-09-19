@@ -1,0 +1,97 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+            "id": 1,
+            "targets": [{"expr": "count(redis_instance_info{job=\"redis\"})", "refId": "A"}],
+            "title": "Members monitored",
+            "type": "stat"
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+            "id": 2,
+            "targets": [{"expr": "count(redis_instance_info{job=\"redis\",role=\"master\"})", "refId": "A"}],
+            "title": "Primary count",
+            "type": "stat"
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
+            "id": 3,
+            "targets": [{"expr": "sum(up{job=\"redis\"})", "refId": "A"}],
+            "title": "Redis targets up",
+            "type": "stat"
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
+            "id": 4,
+            "targets": [{"expr": "redis_master_link_up{job=\"redis\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+            "title": "Replica link status",
+            "type": "timeseries",
+            "fieldConfig": {"defaults": {"min": 0, "max": 1, "unit": "none"}, "overrides": []}
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+            "id": 5,
+            "targets": [{"expr": "redis_connected_slave_lag_seconds{job=\"redis\"}", "legendFormat": "{{instance}} -> {{slave_ip}}", "refId": "A"}],
+            "title": "Replica lag",
+            "type": "timeseries",
+            "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+            "id": 6,
+            "targets": [{"expr": "sum by(instance) (rate(redis_commands_total{job=\"redis\"}[5m]))", "legendFormat": "{{instance}}", "refId": "A"}],
+            "title": "Commands per second",
+            "type": "timeseries",
+            "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+            "id": 7,
+            "targets": [{"expr": "redis_memory_used_bytes{job=\"redis\"}", "legendFormat": "{{instance}} used", "refId": "A"}, {"expr": "redis_memory_max_bytes{job=\"redis\"} > 0", "legendFormat": "{{instance}} max", "refId": "B"}],
+            "title": "Memory usage",
+            "type": "timeseries",
+            "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []}
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+            "id": 8,
+            "targets": [{"expr": "redis_connected_clients{job=\"redis\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+            "title": "Connected clients",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+            "id": 9,
+            "targets": [{"expr": "redis_db_keys{job=\"redis\"}", "legendFormat": "{{instance}} {{db}}", "refId": "A"}],
+            "title": "Keys by database",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {"uid": "prometheus"},
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+            "id": 10,
+            "targets": [{"expr": "redis_master_last_io_seconds_ago{job=\"redis\"}", "legendFormat": "{{instance}}", "refId": "A"}],
+            "title": "Replica primary I/O age",
+            "type": "timeseries",
+            "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": ["redis", "sentinel", "cluster"],
+    "time": {"from": "now-6h", "to": "now"},
+    "title": "Redis HA",
+    "uid": "redis-ha",
+    "version": 1
+}

@@ -1,0 +1,16 @@
+---
+- name: Require explicit SDN bootstrap confirmation
+  ansible.builtin.assert:
+    that:
+      - netbox_sdn_bootstrap_confirm | bool
+    fail_msg: "Set -e netbox_sdn_bootstrap_confirm=true to run NetBox SDN bootstrap."
+
+- name: Require SDN bootstrap seed file
+  ansible.builtin.assert:
+    that:
+      - netbox_sdn_bootstrap_seed_file | length > 0
+    fail_msg: netbox_sdn_bootstrap_seed_file must point to the SDN seed vars file.
+
+- name: Load SDN bootstrap seed variables
+  ansible.builtin.include_vars:
+    file: "{{ netbox_sdn_bootstrap_seed_file }}"

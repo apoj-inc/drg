@@ -1,0 +1,15 @@
+approve:powerdns-dns:
+  stage: powerdns_dns_approve
+  environment:
+    name: "{{ deploy_environment }}/powerdns/dns"
+    action: prepare
+  script:
+    - echo "Approve PowerDNS DNS reconciliation for {{ deploy_environment }}"
+  when: manual
+  allow_failure: false
+  needs:
+    - job: preview:powerdns-dns
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

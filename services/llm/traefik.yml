@@ -1,0 +1,8 @@
+---
+http:
+  - name: llm
+    host: "llm.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 8000
+    middlewares:
+      - secure-headers
+      - rate-limit

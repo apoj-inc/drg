@@ -1,0 +1,96 @@
+---
+- name: Ensure GitLab config directory exists
+  ansible.builtin.file:
+    path: /etc/gitlab
+    state: directory
+    mode: "0755"
+
+- name: Preconfigure GitLab for LXC and Traefik
+  ansible.builtin.blockinfile:
+    path: "{{ gitlab_config_path }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0600"
+    marker: "# {mark} ANSIBLE MANAGED GITLAB CONFIG"
+    block: |
+      external_url '{{ gitlab_external_url }}'
+
+      # Required for LXC: GitLab must not try to modify host kernel sysctls.
+      package['modify_kernel_parameters'] = false
+
+      # Traefik terminates HTTPS; GitLab listens internally over HTTP.
+      nginx['listen_port'] = 80
+      nginx['listen_https'] = false
+
+      # Trust Traefik reverse proxy.
+      nginx['real_ip_trusted_addresses'] = ['{{ traefik_trusted_proxy }}']
+      nginx['real_ip_header'] = 'X-Forwarded-For'
+      nginx['real_ip_recursive'] = 'on'
+
+      # Let Traefik handle certificates.
+      letsencrypt['enable'] = false
+
+      # SSH clone URL port.
+      gitlab_sshd['enable'] = true
+      gitlab_sshd['listen_address'] = '[::]:{{ gitlab_shell_ssh_port | default(22) }}'
+      gitlab_rails['gitlab_shell_ssh_port'] = {{ gitlab_shell_ssh_port | default(22) }}
+
+      # Disable public self-registration.
+      gitlab_rails['gitlab_signup_enabled'] = false
+
+      # External PostgreSQL.
+      postgresql['enable'] = false
+      gitlab_rails['db_adapter'] = 'postgresql'
+      gitlab_rails['db_host'] = '{{ gitlab_postgresql_host }}'
+      gitlab_rails['db_port'] = {{ gitlab_postgresql_port }}
+      gitlab_rails['db_database'] = '{{ gitlab_postgresql_database }}'
+      gitlab_rails['db_username'] = '{{ gitlab_postgresql_username }}'
+      gitlab_rails['db_password'] = '{{ gitlab_postgresql_password }}'
+
+      # Authentik and Keycloak / OpenID Connect.
+      gitlab_rails['omniauth_enabled'] = true
+      gitlab_rails['omniauth_allow_single_sign_on'] = ['openid_connect', 'keycloak']
+      gitlab_rails['omniauth_auto_link_user'] = ['openid_connect', 'keycloak']
+      gitlab_rails['omniauth_block_auto_created_users'] = false
+
+      gitlab_rails['omniauth_providers'] = [
+        {
+          'name' => 'openid_connect',
+          'label' => 'Authentik',
+          'args' => {
+            'name' => 'openid_connect',
+            'scope' => ['openid', 'profile', 'email'],
+            'response_type' => 'code',
+            'issuer' => '{{ authentik_issuer_url }}',
+            'discovery' => true,
+            'client_auth_method' => 'query',
+            'uid_field' => 'preferred_username',
+            'client_options' => {
+              'identifier' => '{{ authentik_client_id }}',
+              'secret' => '{{ authentik_client_secret }}',
+              'redirect_uri' => '{{ gitlab_external_url }}/users/auth/openid_connect/callback'
+            }
+          }
+        },
+        {
+          'name' => 'keycloak',
+          'label' => 'Keycloak',
+          'args' => {
+            'name' => 'keycloak',
+            'strategy_class' => 'OmniAuth::Strategies::OpenIDConnect',
+            'scope' => ['openid', 'profile', 'email', 'groups'],
+            'response_type' => 'code',
+            'issuer' => '{{ keycloak_gitlab_issuer_url }}',
+            'discovery' => true,
+            'client_auth_method' => 'query',
+            'uid_field' => 'preferred_username',
+            'client_options' => {
+              'identifier' => '{{ keycloak_gitlab_client_id }}',
+              'secret' => '{{ keycloak_gitlab_client_secret }}',
+              'redirect_uri' => '{{ gitlab_external_url }}/users/auth/keycloak/callback'
+            }
+          }
+        }
+      ]
+  notify: Reconfigure GitLab

@@ -1,0 +1,62 @@
+---
+- name: Deploy Keycloak
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('keycloak', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    keycloak_image_tag: "{{ keycloak.image_tag }}"
+    keycloak_listen_address: "{{ keycloak.listen_address }}"
+    keycloak_http_port: "{{ keycloak.http_port }}"
+    keycloak_hostname: "{{ keycloak.hostname }}"
+    keycloak_realm: "{{ keycloak.realm }}"
+    keycloak_display_name: "{{ keycloak.display_name }}"
+    keycloak_admin_username: "{{ keycloak.admin_username }}"
+    keycloak_postgresql_host: "{{ keycloak.postgresql.host }}"
+    keycloak_postgresql_port: "{{ keycloak.postgresql.port }}"
+    keycloak_postgresql_database: "{{ keycloak.postgresql.database }}"
+    keycloak_postgresql_username: "{{ keycloak.postgresql.username }}"
+    keycloak_proxy_headers: "{{ keycloak.proxy.headers }}"
+    keycloak_proxy_trusted_addresses: "{{ keycloak.proxy.trusted_addresses }}"
+    keycloak_x509_proxy_provider_enabled: "{{ keycloak.proxy.x509_lookup_provider.enabled }}"
+    keycloak_x509_proxy_provider: "{{ keycloak.proxy.x509_lookup_provider.provider }}"
+    keycloak_x509_certificate_chain_length: "{{ keycloak.proxy.x509_lookup_provider.certificate_chain_length }}"
+    keycloak_freeipa_enabled: "{{ keycloak.freeipa.enabled }}"
+    keycloak_freeipa_connection_url: "{{ keycloak.freeipa.connection_urls | join(' ') }}"
+    keycloak_freeipa_ca_url: "{{ keycloak.freeipa.ca_url }}"
+    keycloak_freeipa_users_dn: "{{ keycloak.freeipa.users_dn }}"
+    keycloak_freeipa_groups_dn: "{{ keycloak.freeipa.groups_dn }}"
+    keycloak_freeipa_bind_dn: "{{ keycloak.freeipa.bind_dn }}"
+    keycloak_freeipa_username_ldap_attribute: "{{ keycloak.freeipa.username_ldap_attribute }}"
+    keycloak_freeipa_rdn_ldap_attribute: "{{ keycloak.freeipa.rdn_ldap_attribute }}"
+    keycloak_freeipa_uuid_ldap_attribute: "{{ keycloak.freeipa.uuid_ldap_attribute }}"
+    keycloak_freeipa_user_object_classes: "{{ keycloak.freeipa.user_object_classes }}"
+    keycloak_freeipa_edit_mode: "{{ keycloak.freeipa.edit_mode }}"
+    keycloak_freeipa_import_users: "{{ keycloak.freeipa.import_users }}"
+    keycloak_freeipa_full_sync: "{{ keycloak.freeipa.full_sync_on_deploy | default(false) }}"
+    keycloak_freeipa_master_admins_enabled: "{{ keycloak.freeipa.master_admins.enabled | default(false) }}"
+    keycloak_freeipa_master_admins_provider_name: "{{ keycloak.freeipa.master_admins.provider_name | default('freeipa-master-admin') }}"
+    keycloak_freeipa_master_admins_ldap_group: "{{ keycloak.freeipa.master_admins.ldap_group | default('admins') }}"
+    keycloak_freeipa_master_admins_keycloak_group_parent: "{{ keycloak.freeipa.master_admins.keycloak_group_parent | default('freeipa') }}"
+    keycloak_freeipa_federation_reconciliation_enabled: "{{ keycloak.freeipa.federation_reconciliation.enabled | default(false) }}"
+    keycloak_freeipa_remove_unmanaged_federations: "{{ keycloak.freeipa.federation_reconciliation.remove_unmanaged | default(false) }}"
+    keycloak_freeipa_managed_application_federation_names: "{{ keycloak.freeipa.federation_reconciliation.application_providers | default(['freeipa']) }}"
+    keycloak_freeipa_managed_master_federation_names: "{{ keycloak.freeipa.federation_reconciliation.master_providers | default(['freeipa-master-admin']) }}"
+    keycloak_clients: "{{ keycloak.clients | default([]) }}"
+    keycloak_admin_password: "{{ lookup('env', 'KEYCLOAK_ADMIN_PASSWORD') }}"
+    keycloak_postgresql_password: "{{ lookup('env', 'KEYCLOAK_POSTGRESQL_PASSWORD') }}"
+    keycloak_freeipa_bind_password: "{{ lookup('env', 'KEYCLOAK_FREEIPA_BIND_PASSWORD') }}"
+    keycloak_oauth2_proxy_client_secret: "{{ lookup('env', 'KEYCLOAK_OAUTH2_PROXY_CLIENT_SECRET') }}"
+    keycloak_gitlab_client_secret: "{{ lookup('env', 'KEYCLOAK_GITLAB_CLIENT_SECRET') }}"
+    keycloak_netbox_client_secret: "{{ lookup('env', 'KEYCLOAK_NETBOX_CLIENT_SECRET') }}"
+    keycloak_openbao_client_secret: "{{ lookup('env', 'KEYCLOAK_OPENBAO_CLIENT_SECRET') }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - keycloak_app
+    - logging_agent

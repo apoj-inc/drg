@@ -1,0 +1,534 @@
+---
+- name: Validate LLM deployment inputs
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Debian'
+      - ansible_distribution_major_version == '13'
+      - llm_pipeline_parallel_size | int == 2
+      - llm_tensor_parallel_size | int == 2
+      - llm_max_model_len | int == 131072
+    fail_msg: >-
+      Debian 13 and the configured vLLM parallelism/context settings are required.
+
+- name: Install base compute packages
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - curl
+      - git
+      - htop
+      - jq
+      - linux-headers-cloud-amd64
+      - "linux-headers-{{ ansible_kernel }}"
+      - ninja-build
+      - numactl
+      - pciutils
+      - qemu-guest-agent
+      - wget
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Enable QEMU guest agent
+  ansible.builtin.systemd:
+    name: qemu-guest-agent
+    enabled: true
+    state: started
+
+- name: Download NVIDIA CUDA repository keyring
+  ansible.builtin.get_url:
+    url: "{{ llm_cuda_keyring_url }}"
+    dest: "{{ llm_cuda_keyring_path }}"
+    mode: "0644"
+  environment: "{{ external_download_environment }}"
+
+- name: Enable NVIDIA CUDA repository
+  ansible.builtin.apt:
+    deb: "{{ llm_cuda_keyring_path }}"
+    state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Pin NVIDIA driver branch
+  ansible.builtin.apt:
+    name: "nvidia-driver-pinning-{{ llm_nvidia_driver_branch }}"
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: llm_nvidia_driver_branch | length > 0
+
+- name: Install NVIDIA compute driver and CUDA toolkit
+  ansible.builtin.apt:
+    name:
+      - cuda-drivers
+      - nvidia-kernel-open-dkms
+      - "{{ llm_cuda_toolkit_package }}"
+    state: present
+    update_cache: true
+  register: llm_nvidia_packages
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Verify CUDA compiler is available for vLLM
+  ansible.builtin.command:
+    argv:
+      - "{{ llm_cuda_home }}/bin/nvcc"
+      - --version
+  register: llm_nvcc
+  changed_when: false
+
+- name: Require the configured CUDA toolkit path
+  ansible.builtin.assert:
+    that:
+      - llm_nvcc.rc == 0
+    fail_msg: >-
+      CUDA toolkit was installed but nvcc is not available at
+      {{ llm_cuda_home }}/bin/nvcc. Check the CUDA repository package and
+      set llm_cuda_home to the installed toolkit path.
+
+- name: Build NVIDIA kernel module for the running kernel
+  ansible.builtin.command:
+    argv:
+      - dkms
+      - autoinstall
+      - -k
+      - "{{ ansible_kernel }}"
+  register: llm_nvidia_dkms
+  changed_when: false
+  failed_when: false
+
+- name: Check whether NVIDIA driver is active
+  ansible.builtin.command: nvidia-smi
+  register: llm_nvidia_smi
+  changed_when: false
+  failed_when: false
+
+- name: Collect NVIDIA driver diagnostics
+  ansible.builtin.shell:
+    cmd: |
+      set +e
+      {
+        echo "kernel: $(uname -r)"
+        echo "dkms:"
+        dkms status
+        echo "loaded NVIDIA modules:"
+        lsmod | grep -E '^nvidia' || true
+        echo "PCI NVIDIA devices:"
+        lspci -Dnnk | grep -A3 -i nvidia || true
+        echo "kernel NVIDIA messages:"
+        journalctl -k -b --no-pager -n 100 | grep -Ei 'nvidia|nouveau|firmware|module' || true
+      } 2>&1
+  register: llm_nvidia_diagnostics
+  changed_when: false
+  failed_when: false
+  when: llm_nvidia_smi.rc != 0
+
+- name: Require a reboot after installing the NVIDIA kernel module
+  ansible.builtin.fail:
+    msg: >-
+      NVIDIA packages are installed but nvidia-smi is still not operational
+      after boot (rc={{ llm_nvidia_smi.rc }}). Verify the DKMS build, Secure
+      Boot state, PCI passthrough and kernel messages below. If this was the
+      first driver installation, reboot the VM once and rerun this playbook;
+      the playbook intentionally does not reboot automatically.
+      nvidia-smi stdout={{ llm_nvidia_smi.stdout | default('') | trim }}
+      nvidia-smi stderr={{ llm_nvidia_smi.stderr | default('') | trim }}
+      dkms stdout={{ llm_nvidia_dkms.stdout | default('') | trim }}
+      dkms stderr={{ llm_nvidia_dkms.stderr | default('') | trim }}
+      diagnostics={{ llm_nvidia_diagnostics.stdout | default('') | trim }}
+  when: llm_nvidia_smi.rc != 0
+
+- name: Select model GPUs from guest topology when no override is supplied
+  ansible.builtin.script: "{{ playbook_dir }}/../scripts/select-gpus.py"
+  register: llm_gpu_selection
+  changed_when: false
+  failed_when: false
+  when: llm_model_gpu_uuids | length == 0
+
+- name: Require GPU topology selection
+  ansible.builtin.assert:
+    that:
+      - llm_model_gpu_uuids | length > 0 or (llm_gpu_selection.rc | default(1)) == 0
+      - llm_model_gpu_uuids | length > 0 or (
+          (llm_gpu_selection.stdout_lines | default([]))
+          | select('match', '^GPU-[0-9a-fA-F-]{36}(,GPU-[0-9a-fA-F-]{36}){3}$')
+          | list
+          | length == 1
+        )
+    fail_msg: >-
+      LLM_MODEL_GPU_UUIDS is not set and automatic GPU discovery failed after
+      the NVIDIA driver became available. Verify the guest has four RTX 3080
+      GPUs, or set LLM_MODEL_GPU_UUIDS to four comma-separated GPU UUIDs.
+
+- name: Use automatically selected model GPU UUIDs
+  ansible.builtin.set_fact:
+    llm_model_gpu_uuids: >-
+      {{ (
+        llm_gpu_selection.stdout_lines
+        | select('match', '^GPU-[0-9a-fA-F-]{36}(,GPU-[0-9a-fA-F-]{36}){3}$')
+        | list
+        | first
+      ).split(',') }}
+  when: llm_model_gpu_uuids | length == 0
+
+- name: Validate selected model GPU UUIDs
+  ansible.builtin.assert:
+    that:
+      - llm_model_gpu_uuids | length == 4
+      - llm_model_gpu_uuids | unique | length == 4
+      - llm_model_gpu_uuids | select('match', '^GPU-[0-9a-fA-F-]{36}$') | list | length == 4
+    fail_msg: >-
+      Four unique GPU UUIDs from the guest topology are required. Set
+      LLM_MODEL_GPU_UUIDS to a comma-separated list of GPU-... UUIDs.
+
+- name: Ensure LLM system group exists
+  ansible.builtin.group:
+    name: "{{ llm_group }}"
+    system: true
+    state: present
+
+- name: Ensure LLM system user exists
+  ansible.builtin.user:
+    name: "{{ llm_user }}"
+    group: "{{ llm_group }}"
+    groups: video,render
+    append: true
+    home: "{{ llm_home }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+    system: true
+
+- name: Create LLM directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ llm_home }}", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0755"}
+    - {path: "{{ llm_home }}/venvs", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0755"}
+    - {path: "{{ llm_data_root }}", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0750"}
+    - {path: "{{ llm_data_root }}/huggingface", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0750"}
+    - {path: "{{ llm_data_root }}/vllm-cache", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0750"}
+    - {path: "{{ llm_data_root }}/logs", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0750"}
+    - {path: "{{ llm_data_root }}/models", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0750"}
+    - {path: "{{ llm_emergency_model_dir }}", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0750"}
+    - {path: "{{ llm_emergency_wheelhouse }}", owner: "{{ llm_user }}", group: "{{ llm_group }}", mode: "0750"}
+    - {path: "{{ llm_config_dir }}", owner: root, group: "{{ llm_group }}", mode: "0750"}
+
+- name: Check installed uv version
+  ansible.builtin.command: /usr/local/bin/uv --version
+  register: llm_uv_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download pinned uv installer
+  ansible.builtin.get_url:
+    url: "{{ llm_uv_installer_url }}"
+    dest: "{{ llm_uv_installer_path }}"
+    mode: "0755"
+  environment: "{{ external_download_environment }}"
+  when: llm_uv_installed.rc != 0 or llm_uv_version not in llm_uv_installed.stdout
+
+- name: Install pinned uv release
+  ansible.builtin.command:
+    argv: [sh, "{{ llm_uv_installer_path }}"]
+  environment: >-
+    {{ external_download_environment | combine({
+      'UV_UNMANAGED_INSTALL': '/usr/local/bin',
+      'UV_NO_MODIFY_PATH': '1'
+    }) }}
+  when: llm_uv_installed.rc != 0 or llm_uv_version not in llm_uv_installed.stdout
+
+- name: Create isolated Python 3.12 environment
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/uv
+      - venv
+      - --python
+      - "3.12"
+      - --managed-python
+      - --seed
+      - "{{ llm_venv }}"
+    creates: "{{ llm_venv }}/bin/python"
+  become_user: "{{ llm_user }}"
+  environment: >-
+    {{ external_download_environment | combine({
+      'HOME': llm_home,
+      'UV_HTTP_TIMEOUT': llm_uv_http_timeout,
+      'UV_HTTP_RETRIES': llm_uv_http_retries,
+      'UV_CONCURRENT_DOWNLOADS': llm_uv_concurrent_downloads
+    }) }}
+
+- name: Check installed vLLM version
+  ansible.builtin.command:
+    argv:
+      - "{{ llm_venv }}/bin/python"
+      - -c
+      - "import importlib.metadata; print(importlib.metadata.version('vllm'))"
+  register: llm_vllm_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install pinned vLLM release
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/uv
+      - pip
+      - install
+      - --python
+      - "{{ llm_venv }}/bin/python"
+      - "vllm=={{ llm_vllm_version }}"
+  become_user: "{{ llm_user }}"
+  environment: >-
+    {{ external_download_environment | combine({
+      'HOME': llm_home,
+      'UV_HTTP_TIMEOUT': llm_uv_http_timeout,
+      'UV_HTTP_RETRIES': llm_uv_http_retries,
+      'UV_CONCURRENT_DOWNLOADS': llm_uv_concurrent_downloads
+    }) }}
+  when:
+    - not llm_emergency_pip
+    - llm_vllm_installed.stdout | default('') | trim != llm_vllm_version
+  notify: Restart vLLM main
+
+- name: Resolve emergency pip wheelhouse
+  ansible.builtin.command:
+    argv:
+      - "{{ llm_venv }}/bin/python"
+      - -m
+      - pip
+      - install
+      - --disable-pip-version-check
+      - --dry-run
+      - --ignore-installed
+      - --report
+      - "{{ llm_emergency_pip_report }}"
+      - "vllm=={{ llm_vllm_version }}"
+  become_user: "{{ llm_user }}"
+  environment:
+    HOME: "{{ llm_home }}"
+    https_proxy: "{{ external_download_environment.https_proxy | default(external_download_proxy_url, true) }}"
+    PIP_DEFAULT_TIMEOUT: "{{ llm_pip_http_timeout }}"
+    PIP_RETRIES: "{{ llm_pip_retries }}"
+  changed_when: false
+  when:
+    - llm_emergency_pip
+    - llm_vllm_installed.stdout | default('') | trim != llm_vllm_version
+
+- name: Download emergency pip wheelhouse with resumable curl
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      while IFS=$'\t' read -r wheel_url wheel_name wheel_sha256; do
+        test -n "$wheel_url"
+        wheel_path="{{ llm_emergency_wheelhouse }}/$wheel_name"
+
+        if test -n "$wheel_sha256" && test -f "$wheel_path" && \
+           printf '%s  %s\n' "$wheel_sha256" "$wheel_path" | sha256sum -c - >/dev/null 2>&1; then
+          echo "Already complete: $wheel_name"
+          continue
+        fi
+
+        echo "Downloading $wheel_name"
+        attempt=0
+        while :; do
+          attempt=$(( attempt + 1 ))
+          if curl --fail --location \
+              --continue-at - \
+              --retry 0 \
+              --connect-timeout 15 \
+              --max-time "{{ llm_pip_http_timeout }}" \
+              --output "$wheel_path" \
+              "$wheel_url"; then
+            if test -z "$wheel_sha256" || \
+               printf '%s  %s\n' "$wheel_sha256" "$wheel_path" | sha256sum -c - >/dev/null 2>&1; then
+              break
+            fi
+            echo "Checksum mismatch for $wheel_name; restarting it"
+            rm -f "$wheel_path"
+          fi
+          echo "Retrying $wheel_name (attempt $(( attempt + 1 )))"
+          sleep 5
+        done
+      done < <(
+        jq -r '
+          .install[]
+          | select(.download_info.url != null)
+          | [
+              .download_info.url,
+              (.download_info.url | split("?")[0] | split("/")[-1]),
+              (.download_info.archive_info.hashes.sha256 // "")
+            ]
+            | @tsv
+        ' "{{ llm_emergency_pip_report }}"
+      )
+    executable: /bin/bash
+  become_user: "{{ llm_user }}"
+  environment:
+    https_proxy: "{{ external_download_environment.https_proxy | default(external_download_proxy_url, true) }}"
+  when:
+    - llm_emergency_pip
+    - llm_vllm_installed.stdout | default('') | trim != llm_vllm_version
+
+- name: Install pinned vLLM from emergency wheelhouse
+  ansible.builtin.command:
+    argv:
+      - "{{ llm_venv }}/bin/python"
+      - -m
+      - pip
+      - install
+      - --disable-pip-version-check
+      - --no-index
+      - --find-links
+      - "{{ llm_emergency_wheelhouse }}"
+      - "vllm=={{ llm_vllm_version }}"
+  become_user: "{{ llm_user }}"
+  when:
+    - llm_emergency_pip
+    - llm_vllm_installed.stdout | default('') | trim != llm_vllm_version
+  notify: Restart vLLM main
+
+- name: Check emergency Hugging Face model snapshot
+  ansible.builtin.stat:
+    path: "{{ llm_emergency_model_complete }}"
+  register: llm_emergency_model_state
+  when: llm_emergency_model_download
+
+- name: Resolve emergency Hugging Face model manifest
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      curl --fail --silent --show-error --location --http1.1 \
+        --proxy "$https_proxy" \
+        --connect-timeout 30 \
+        --max-time "{{ llm_hf_http_timeout }}" \
+        "https://huggingface.co/api/models/{{ llm_model_id }}" \
+        >"{{ llm_emergency_model_manifest }}"
+      jq -e '.siblings | length > 0' "{{ llm_emergency_model_manifest }}" >/dev/null
+  become_user: "{{ llm_user }}"
+  environment:
+    HOME: "{{ llm_home }}"
+    https_proxy: "{{ external_download_environment.https_proxy | default(external_download_proxy_url, true) }}"
+  changed_when: false
+  when:
+    - llm_emergency_model_download
+    - not (llm_emergency_model_state.stat.exists | default(false))
+
+- name: Download emergency Hugging Face model with resumable curl
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      while IFS= read -r model_file; do
+        test -n "$model_file"
+        model_path="{{ llm_emergency_model_dir }}/$model_file"
+        marker="$model_path.llm-complete"
+        mkdir -p "$(dirname "$model_path")"
+
+        if test -f "$marker" && test -f "$model_path"; then
+          echo "Already complete: $model_file"
+          continue
+        fi
+
+        model_url="https://huggingface.co/{{ llm_model_id }}/resolve/main/$model_file?download=true"
+        echo "Downloading $model_file"
+        attempt=0
+        while :; do
+          attempt=$(( attempt + 1 ))
+          if curl --fail --location --http1.1 \
+              --proxy "$https_proxy" \
+              --continue-at - \
+              --retry 0 \
+              --connect-timeout 30 \
+              --max-time "{{ llm_hf_http_timeout }}" \
+              --speed-limit 1024 \
+              --speed-time 60 \
+              --output "$model_path" \
+              "$model_url"; then
+            touch "$marker"
+            break
+          fi
+          echo "Retrying $model_file (attempt $(( attempt + 1 )))"
+          sleep 5
+        done
+        done < <(jq -r '.siblings[] | .rfilename' "{{ llm_emergency_model_manifest }}")
+      touch "{{ llm_emergency_model_complete }}"
+    executable: /bin/bash
+  become_user: "{{ llm_user }}"
+  environment:
+    https_proxy: "{{ external_download_environment.https_proxy | default(external_download_proxy_url, true) }}"
+  when:
+    - llm_emergency_model_download
+    - not (llm_emergency_model_state.stat.exists | default(false))
+
+- name: Install LLM operational scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/sbin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - llm-preflight
+    - llm-smoke-test
+    - llm-context-test
+    - llm-benchmark
+  notify: Restart vLLM main
+
+- name: Install vLLM launcher
+  ansible.builtin.template:
+    src: vllm-main.j2
+    dest: /usr/local/sbin/vllm-main
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart vLLM main
+
+- name: Render vLLM environment
+  ansible.builtin.template:
+    src: vllm-main.env.j2
+    dest: "{{ llm_environment_file }}"
+    owner: root
+    group: "{{ llm_group }}"
+    mode: "0640"
+  notify: Restart vLLM main
+
+- name: Install vLLM systemd unit
+  ansible.builtin.template:
+    src: vllm-main.service.j2
+    dest: /etc/systemd/system/vllm-main.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart vLLM main
+
+- name: Run fail-fast GPU and model preflight
+  ansible.builtin.command: /usr/local/sbin/llm-preflight
+  changed_when: false
+
+- name: Apply vLLM configuration before starting
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start vLLM
+  ansible.builtin.systemd:
+    name: vllm-main
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for vLLM health endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ llm_api_port }}/health"
+    status_code: 200
+  register: llm_health
+  retries: 120
+  delay: 30
+  until: llm_health.status | default(0) == 200
+
+- name: Run API and GPU allocation smoke tests
+  ansible.builtin.command: /usr/local/sbin/llm-smoke-test
+  changed_when: false

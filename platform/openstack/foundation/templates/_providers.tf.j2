@@ -1,0 +1,10 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+provider "openstack" {
+  cloud    = var.openstack_cloud
+  auth_url = var.openstack_auth_url
+  region   = var.openstack_region
+  endpoint_type = "internal"
+  insecure = false
+}

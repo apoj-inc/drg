@@ -1,0 +1,7 @@
+---
+- name: Restart GitLab explicitly
+  ansible.builtin.command: gitlab-ctl restart
+  changed_when: true
+  tags:
+    - never
+    - restart

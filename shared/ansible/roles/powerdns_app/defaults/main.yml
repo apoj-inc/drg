@@ -1,0 +1,53 @@
+---
+powerdns_compose_dir: /opt/powerdns
+powerdns_image_tag: "4.9.15"
+powerdns_image: "powerdns/pdns-auth-49:{{ powerdns_image_tag }}"
+powerdns_recursor_image_tag: "5.4.0"
+powerdns_recursor_image: "powerdns/pdns-recursor-54:{{ powerdns_recursor_image_tag }}"
+powerdns_dnsdist_image_tag: "1.9.7"
+powerdns_dnsdist_image: "powerdns/dnsdist-19:{{ powerdns_dnsdist_image_tag }}"
+powerdns_listen_address: "0.0.0.0"
+powerdns_dns_port: 53000
+powerdns_recursor_listen_address: "{{ powerdns_listen_address }}"
+powerdns_recursor_dns_port: 53
+powerdns_recursor_container_dns_port: 53053
+powerdns_recursor_default_dns: "1.1.1.1"
+powerdns_local_zone: ""
+powerdns_recursor_forward_zones:
+  - zone: "{{ powerdns_local_zone }}"
+    address: "127.0.0.1"
+    port: "{{ powerdns_dns_port }}"
+powerdns_api_address: "0.0.0.0"
+powerdns_api_port: 8081
+powerdns_monitoring_allowed_cidrs: []
+powerdns_api_key: ""
+powerdns_netbox_api_url: "{{ lookup('env', 'NETBOX_API') | default('', true) }}"
+powerdns_netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') | default('', true) }}"
+powerdns_netbox_validate_certs: "{{ lookup('env', 'NETBOX_VALIDATE_CERTS') | default('true', true) | bool }}"
+powerdns_allowed_vnets:
+  - prod-app
+  - test-app
+powerdns_static_allow_from:
+  - 127.0.0.0/8
+  - 172.0.0.0/8
+  - 192.0.2.0/24
+  - 198.51.100.0/24
+powerdns_host_entries: []
+powerdns_allowed_cidrs: "{{ powerdns_static_allow_from + (powerdns_netbox_vnet_cidrs | default([])) }}"
+powerdns_webserver_allow_from: "{{ powerdns_allowed_cidrs + powerdns_monitoring_allowed_cidrs }}"
+powerdns_recursor_metrics_port: 8082
+powerdns_dnsdist_listen_address: "0.0.0.0"
+powerdns_dnsdist_dns_port: 53
+powerdns_dnsdist_peer_group: tags_powerdns
+powerdns_dnsdist_config_path: "{{ powerdns_compose_dir }}/dnsdist.conf"
+powerdns_auth_allow_axfr_ips: "{{ powerdns_allowed_cidrs }}"
+powerdns_recursor_allow_from: "{{ powerdns_allowed_cidrs }}"
+powerdns_postgresql_host: postgresql.example.test
+powerdns_postgresql_address: ""
+powerdns_postgresql_port: 5432
+powerdns_postgresql_database: powerdns
+powerdns_postgresql_username: powerdns
+powerdns_postgresql_password: ""
+powerdns_default_ttl: 300
+powerdns_default_soa_edit: INCEPTION-INCREMENT
+powerdns_healthcheck_url: "http://127.0.0.1:{{ powerdns_api_port }}/api/v1/servers/localhost"

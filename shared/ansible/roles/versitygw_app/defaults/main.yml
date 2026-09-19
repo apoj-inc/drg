@@ -1,0 +1,17 @@
+---
+versitygw_compose_dir: /opt/versitygw
+versitygw_image: versity/versitygw:v1.7.0
+versitygw_port: 7070
+versitygw_admin_port: 7071
+versitygw_storage_mode: local_disk
+versitygw_data_dir: /srv/versitygw-data/objects
+versitygw_iam_dir: /srv/versitygw-data/iam
+versitygw_versioning_dir: /srv/versitygw-data/versioning
+versitygw_root_access_key: ""
+versitygw_root_secret_key: ""
+versitygw_forgejo_access_key: ""
+versitygw_forgejo_secret_key: ""
+versitygw_forgejo_bucket: forgejo
+versitygw_grafana_access_key: ""
+versitygw_grafana_secret_key: ""
+versitygw_grafana_bucket: grafana-prometheus-snapshots

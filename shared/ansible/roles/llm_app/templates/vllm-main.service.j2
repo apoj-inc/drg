@@ -1,0 +1,25 @@
+[Unit]
+Description=vLLM main Qwen3.8 OpenAI-compatible API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ llm_user }}
+Group={{ llm_group }}
+WorkingDirectory={{ llm_home }}
+EnvironmentFile={{ llm_environment_file }}
+Environment=HOME={{ llm_home }}
+ExecStart=/usr/local/sbin/vllm-main
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=infinity
+LimitMEMLOCK=infinity
+TasksMax=infinity
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={{ llm_data_root }} {{ llm_home }}
+
+[Install]
+WantedBy=multi-user.target

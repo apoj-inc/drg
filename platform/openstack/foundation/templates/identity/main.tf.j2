@@ -1,0 +1,44 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: platform/openstack/foundation/*.yaml
+# Generator: platform/openstack/scripts/generate-foundation.py
+module "project" {
+  for_each = {
+{% for name, project in config.identity.projects.items() %}
+    {{ name | tf_string }} = {
+      description = {{ project.description | default(None) | tf_value }}
+      compute_quota = {
+        cores                = {{ project.compute_quota.cores }}
+        instances            = {{ project.compute_quota.instances }}
+        ram                  = {{ project.compute_quota.ram }}
+        key_pairs            = {{ project.compute_quota.key_pairs }}
+        server_groups        = {{ project.compute_quota.server_groups }}
+        server_group_members = {{ project.compute_quota.server_group_members }}
+      }
+      network_quota = {
+        network             = {{ project.network_quota.network }}
+        subnet              = {{ project.network_quota.subnet }}
+        port                = {{ project.network_quota.port }}
+        router              = {{ project.network_quota.router }}
+        floatingip          = {{ project.network_quota.floatingip }}
+        security_group      = {{ project.network_quota.security_group }}
+        security_group_rule = {{ project.network_quota.security_group_rule }}
+      }
+      volume_quota = {
+        volumes          = {{ project.volume_quota.volumes }}
+        snapshots        = {{ project.volume_quota.snapshots }}
+        gigabytes        = {{ project.volume_quota.gigabytes }}
+        backups          = {{ project.volume_quota.backups }}
+        backup_gigabytes = {{ project.volume_quota.backup_gigabytes }}
+      }
+    }
+{% endfor %}
+  }
+
+  source = "../../../../../../shared/terraform/openstack_project"
+
+  name        = each.key
+  description = each.value.description
+  compute_quota  = each.value.compute_quota
+  network_quota  = each.value.network_quota
+  volume_quota   = each.value.volume_quota
+}

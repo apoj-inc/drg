@@ -1,0 +1,49 @@
+---
+- name: Install OAuth2 Proxy prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Validate OAuth2 Proxy settings
+  ansible.builtin.assert:
+    that:
+      - oauth2_proxy_issuer_url | string | length > 0
+      - oauth2_proxy_keycloak_hostname | string | length > 0
+      - not (oauth2_proxy_skip_oidc_discovery | bool) or oauth2_proxy_keycloak_ip | string | length > 0
+      - not (oauth2_proxy_skip_oidc_discovery | bool) or oauth2_proxy_keycloak_direct_url | string | length > 0
+      - oauth2_proxy_client_id | string | length > 0
+      - oauth2_proxy_client_secret | string | length > 0
+      - oauth2_proxy_cookie_secret | string | length > 0
+      - oauth2_proxy_redirect_url | string | length > 0
+      - oauth2_proxy_trusted_proxy_ips | string | length > 0
+    fail_msg: >-
+      OAuth2 Proxy requires an issuer, client credentials, cookie secret,
+      redirect URL, trusted proxy IP ranges, and temporary direct Keycloak
+      endpoints while service DNS and ingress are being reconciled.
+  no_log: true
+
+- name: Configure OAuth2 Proxy
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Run OAuth2 Proxy Compose lifecycle
+  ansible.builtin.import_role:
+    name: compose_app
+  vars:
+    compose_app_name: oauth2-proxy
+    compose_app_root: "{{ oauth2_proxy_compose_dir }}"
+    compose_app_healthcheck_url: "{{ oauth2_proxy_healthcheck_url }}"
+    compose_app_healthcheck_retries: 30
+    compose_app_healthcheck_delay: 3
+
+- name: Restart OAuth2 Proxy explicitly
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: restart.yml
+  vars:
+    compose_app_root: "{{ oauth2_proxy_compose_dir }}"
+  tags:
+    - never
+    - restart

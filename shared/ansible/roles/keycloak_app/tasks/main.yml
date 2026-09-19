@@ -1,0 +1,90 @@
+---
+- name: Install Keycloak prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Validate Keycloak settings
+  ansible.builtin.assert:
+    that:
+      - keycloak_hostname | string | length > 0
+      - keycloak_realm | string | length > 0
+      - keycloak_admin_username | string | length > 0
+      - keycloak_admin_password | string | length > 0
+      - keycloak_postgresql_host | string | length > 0
+      - keycloak_postgresql_database | string | length > 0
+      - keycloak_postgresql_username | string | length > 0
+      - keycloak_postgresql_password | string | length > 0
+      - keycloak_cluster_external_address | string | length > 0
+      - keycloak_proxy_headers in ['forwarded', 'xforwarded']
+      - not (keycloak_freeipa_enabled | bool) or keycloak_freeipa_bind_password | string | length > 0
+      - not (keycloak_freeipa_enabled | bool) or keycloak_freeipa_connection_url | string | length > 0
+      - not (keycloak_freeipa_enabled | bool) or keycloak_freeipa_ca_url | string | length > 0
+      - keycloak_clients | length == 0 or keycloak_oauth2_proxy_client_secret | string | length > 0
+      - keycloak_clients | length == 0 or keycloak_gitlab_client_secret | string | length > 0
+      - keycloak_clients | length == 0 or keycloak_netbox_client_secret | string | length > 0
+      - keycloak_clients | length == 0 or keycloak_openbao_client_secret | string | length > 0
+      - not (keycloak_freeipa_federation_reconciliation_enabled | bool) or 'freeipa' in keycloak_freeipa_managed_application_federation_names
+      - not (keycloak_freeipa_federation_reconciliation_enabled | bool) or not (keycloak_freeipa_master_admins_enabled | bool) or keycloak_freeipa_master_admins_provider_name in keycloak_freeipa_managed_master_federation_names
+    fail_msg: >-
+      Keycloak requires hostname/realm/admin/PostgreSQL settings and
+      KEYCLOAK_ADMIN_PASSWORD plus KEYCLOAK_POSTGRESQL_PASSWORD. FreeIPA
+      federation also requires KEYCLOAK_FREEIPA_BIND_PASSWORD. Managed
+      federation names must include the providers configured by this role.
+  no_log: true
+  tags:
+    - configure
+
+- name: Configure Keycloak
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Run Keycloak Compose lifecycle
+  ansible.builtin.import_role:
+    name: compose_app
+  vars:
+    compose_app_name: keycloak
+    compose_app_root: "{{ keycloak_compose_dir }}"
+    compose_app_healthcheck_url: "{{ keycloak_healthcheck_url }}"
+    compose_app_healthcheck_retries: 30
+    compose_app_healthcheck_delay: 5
+
+- name: Reconcile Keycloak realm clients
+  ansible.builtin.import_tasks: clients.yml
+  when: keycloak_clients | length > 0
+  tags:
+    - configure
+
+- name: Reconcile Keycloak LDAP mappers
+  ansible.builtin.import_tasks: ldap_mappers.yml
+  when: keycloak_freeipa_enabled | bool
+  tags:
+    - configure
+
+- name: Reconcile FreeIPA administrators in the Keycloak master realm
+  ansible.builtin.import_tasks: master_ldap.yml
+  when:
+    - keycloak_freeipa_enabled | bool
+    - keycloak_freeipa_master_admins_enabled | bool
+  tags:
+    - configure
+
+- name: Reconcile configured Keycloak user federations
+  ansible.builtin.import_tasks: federation_reconciliation.yml
+  when:
+    - keycloak_freeipa_enabled | bool
+    - keycloak_freeipa_federation_reconciliation_enabled | bool
+  tags:
+    - configure
+
+- name: Restart Keycloak explicitly
+  ansible.builtin.import_role:
+    name: compose_app
+    tasks_from: restart.yml
+  vars:
+    compose_app_root: "{{ keycloak_compose_dir }}"
+  tags:
+    - never
+    - restart

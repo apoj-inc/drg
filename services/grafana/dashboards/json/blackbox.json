@@ -1,0 +1,143 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "sum(probe_success)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Probes up",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "sum(probe_success == 0)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Probes down",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "probe_duration_seconds",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Probe duration",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "probe_http_status_code",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "HTTP status code",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 14
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "(probe_ssl_earliest_cert_expiry - time()) / 86400",
+                    "legendFormat": "{{instance}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "TLS certificate days remaining",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "expr": "sum by(router,code) (rate(traefik_router_requests_total[5m]))",
+                    "legendFormat": "{{router}} {{code}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik requests by public route",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "blackbox",
+        "tls",
+        "traefik"
+    ],
+    "time": {
+        "from": "now-24h",
+        "to": "now"
+    },
+    "title": "External availability / Blackbox",
+    "uid": "blackbox",
+    "version": 1
+}

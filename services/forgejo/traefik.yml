@@ -1,0 +1,18 @@
+---
+http:
+  - name: forgejo
+    host: forge.example.test
+    backend_port: 3000
+    health_check:
+      path: /api/healthz
+      scheme: http
+      interval: 10s
+      timeout: 3s
+    middlewares: [secure-headers, rate-limit]
+tcp:
+  - name: forgejo-ssh
+    listen_port: 2223
+    backend_port: 2223
+    health_check:
+      interval: 10s
+      timeout: 3s

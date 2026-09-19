@@ -1,0 +1,17 @@
+[Unit]
+Description=Forgejo Actions Runner
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ forgejo_runner_user }}
+Group={{ forgejo_runner_group }}
+WorkingDirectory={{ forgejo_runner_home }}
+ExecStart={{ forgejo_runner_binary_path }} daemon --config {{ forgejo_runner_config_path }}
+Restart=always
+RestartSec=5
+Environment=HOME={{ forgejo_runner_home }}
+
+[Install]
+WantedBy=multi-user.target

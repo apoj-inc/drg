@@ -1,0 +1,9 @@
+list_repositories:
+  stage: {{ job.stage }}
+  environment:
+    name: $ENVIRONMENT/docker
+  script:
+    - curl -sS --proxy "${HTTPS_PROXY:?HTTPS_PROXY is required}" "https://$DOCKERHUB_URL/v2/_catalog"
+  {% if job.when %}
+  when: "{{ job.when }}"
+  {% endif %}

@@ -1,0 +1,20 @@
+---
+gitlab_runner_config_path: /etc/gitlab-runner/config.toml
+gitlab_runner_registration_delegate_host: gitlab
+gitlab_runner_registration_type: instance_type
+gitlab_runner_token: ""
+gitlab_runner_description: "{{ inventory_hostname }}"
+gitlab_runner_executor: shell
+gitlab_runner_run_untagged: false
+gitlab_runner_tags: []
+gitlab_runner_concurrent: 8
+gitlab_runner_home: /home/gitlab-runner
+opentofu_version: "1.12.3"
+opentofu_arch: amd64
+opentofu_deb_name: "tofu_{{ opentofu_version }}_{{ opentofu_arch }}.deb"
+opentofu_deb_url: "https://github.com/opentofu/opentofu/releases/download/v{{ opentofu_version }}/{{ opentofu_deb_name }}"
+opentofu_deb_path: "/tmp/{{ opentofu_deb_name }}"
+opentofu_deb_checksum: ""
+opentofu_provider_mirror_url: "https://terraform-mirror.yandexcloud.net/"
+opentofu_provider_mirror_include:
+  - "registry.opentofu.org/*/*"

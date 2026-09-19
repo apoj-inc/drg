@@ -1,0 +1,5 @@
+---
+name: database-requester
+rules:
+  - path: database/creds/*
+    capabilities: [read]

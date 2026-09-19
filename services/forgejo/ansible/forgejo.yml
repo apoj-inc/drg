@@ -1,0 +1,148 @@
+---
+- name: Deploy Forgejo
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('forgejo', true) }}"
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../config.yaml
+  vars:
+    forgejo_ha_backend: "{{ ha.backend | default('etcd') }}"
+    forgejo_ha_sync: "{{ lookup('env', 'HA_SYNC') | default('false', true) | bool }}"
+    forgejo_ha_storage_backend: "{{ storage.ha_backend | default('drbd') }}"
+    forgejo_image: "{{ forgejo.image }}:{{ forgejo.image_tag }}"
+    forgejo_http_port: "{{ forgejo.http_port }}"
+    forgejo_ssh_port: "{{ forgejo.ssh_port }}"
+    forgejo_root_url: "{{ forgejo.root_url }}"
+    forgejo_repository_root: "{{ forgejo.repository_root }}"
+    forgejo_repository_container_root: /data/git/repositories
+    forgejo_data_dir: "{{ forgejo.data_dir }}"
+    forgejo_ha_group: tags_forgejo
+    pacemaker_ha_group: "{{ forgejo_ha_group }}"
+    pacemaker_ha_cluster_name: forgejo-ha
+    pacemaker_ha_resource_name: forgejo-service
+    pacemaker_ha_service_name: forgejo-ha.service
+    pacemaker_ha_service_description: Forgejo container managed by Pacemaker
+    pacemaker_ha_service_working_directory: /opt/forgejo
+    pacemaker_ha_service_exec_start: /usr/bin/docker compose up -d forgejo
+    pacemaker_ha_service_exec_stop: /usr/bin/docker compose down
+    pacemaker_ha_generate_corosync_authkey: true
+    pacemaker_ha_corosync_authkey_stage_path: /tmp/forgejo-corosync-authkey
+    pacemaker_ha_cluster_setup_path: /usr/local/sbin/pacemaker-ha-cluster-setup
+    etcd_ha_group: "{{ forgejo_ha_group }}"
+    etcd_ha_etcd_group: etcd
+    etcd_ha_endpoints: "{{ ha.etcd_endpoints | default([]) }}"
+    etcd_ha_controller_name: forgejo
+    etcd_ha_controller_unit: forgejo-etcd-ha.service
+    etcd_ha_service_name: forgejo
+    etcd_ha_service_unit: forgejo-ha.service
+    etcd_ha_service_description: Forgejo container and storage managed by an etcd lease
+    etcd_ha_service_working_directory: /opt/forgejo
+    etcd_ha_service_exec_start: /usr/local/sbin/forgejo-ha-control start
+    etcd_ha_service_exec_stop: /usr/local/sbin/forgejo-ha-control stop
+    etcd_ha_service_after:
+      - docker.service
+      - "{{ forgejo_ha_drbd_unit }}"
+      - network-online.target
+    etcd_ha_service_wants:
+      - network-online.target
+    etcd_ha_healthcheck_command: "/usr/bin/curl --fail --silent http://127.0.0.1:{{ forgejo.http_port }}/api/healthz >/dev/null"
+    etcd_ha_storage_backend: "{{ forgejo_ha_storage_backend }}"
+    etcd_ha_shared_mountpoint: "{{ storage.drbd.mountpoint }}"
+    etcd_ha_shared_mount_source: "{{ storage.shared_filesystem.source | default('') }}"
+    etcd_ha_shared_mount_fstype: "{{ storage.shared_filesystem.fstype | default('nfs') }}"
+    etcd_ha_shared_mount_options: "{{ storage.shared_filesystem.options | default('vers=4,hard,_netdev,noatime') }}"
+    etcd_ha_start_controller: false
+    forgejo_ha_shared_mount_source: "{{ storage.shared_filesystem.source | default('') }}"
+    forgejo_ha_shared_mount_fstype: "{{ storage.shared_filesystem.fstype | default('nfs') }}"
+    forgejo_ha_shared_mount_options: "{{ storage.shared_filesystem.options | default('vers=4,hard,_netdev,noatime') }}"
+    forgejo_ha_drbd_resource: "{{ storage.drbd.resource }}"
+    forgejo_ha_drbd_device: "{{ storage.drbd.device }}"
+    forgejo_ha_drbd_backing_device: "{{ storage.drbd.backing_device }}"
+    forgejo_ha_drbd_port: "{{ storage.drbd.port }}"
+    forgejo_ha_mountpoint: "{{ storage.drbd.mountpoint }}"
+    forgejo_ha_filesystem: "{{ storage.drbd.filesystem }}"
+    forgejo_ha_drbd_shared_secret: "{{ lookup('env', 'FORGEJO_INTERNAL_TOKEN') }}"
+    forgejo_postgresql_host: "{{ forgejo.postgresql.host }}"
+    forgejo_postgresql_port: "{{ forgejo.postgresql.port }}"
+    forgejo_postgresql_database: "{{ forgejo.postgresql.database }}"
+    forgejo_postgresql_username: "{{ forgejo.postgresql.username }}"
+    forgejo_postgresql_ssl_mode: "{{ forgejo.postgresql.ssl_mode }}"
+    forgejo_postgresql_password: "{{ lookup('env', 'FORGEJO_POSTGRESQL_PASSWORD') }}"
+    forgejo_secret_key: "{{ lookup('env', 'FORGEJO_SECRET_KEY') }}"
+    forgejo_internal_token: "{{ lookup('env', 'FORGEJO_INTERNAL_TOKEN') }}"
+    forgejo_lfs_jwt_secret: "{{ lookup('env', 'FORGEJO_LFS_JWT_SECRET') }}"
+    forgejo_oidc_client_secret: "{{ lookup('env', 'FORGEJO_OIDC_CLIENT_SECRET') }}"
+    forgejo_s3_access_key: "{{ lookup('env', 'FORGEJO_S3_ACCESS_KEY') }}"
+    forgejo_s3_secret_key: "{{ lookup('env', 'FORGEJO_S3_SECRET_KEY') }}"
+    forgejo_s3_endpoint: "{{ forgejo.s3.endpoint }}"
+    forgejo_s3_region: "{{ forgejo.s3.region }}"
+    forgejo_s3_bucket: "{{ forgejo.s3.bucket }}"
+    forgejo_s3_use_ssl: "{{ forgejo.s3.use_ssl | default(true) }}"
+    forgejo_oidc_issuer_url: "{{ forgejo.oidc.issuer_url }}"
+    forgejo_oidc_client_id: "{{ forgejo.oidc.client_id }}"
+    forgejo_oidc_provider_name: "{{ forgejo.oidc.provider_name }}"
+    forgejo_webhook_allowed_host_list: "{{ forgejo.webhook_allowed_host_list }}"
+    forgejo_openbao_delegate_host: >-
+      {{ (groups['openbao'] | default([]) | sort | first) | default('', true) }}
+    forgejo_openbao_api_addr: "http://127.0.0.1:8200"
+    forgejo_openbao_auth_definition_file: >-
+      {{ playbook_dir }}/../../openbao/openbao-config/auth/forgejo-actions.yaml
+    forgejo_openbao_configure_actions_auth: >-
+      {{ lookup('env', 'FORGEJO_OPENBAO_CONFIGURE_ACTIONS_AUTH')
+         | default(false, true) | bool }}
+    forgejo_openbao_config_token: >-
+      {{ (lookup('env', 'OPENBAO_ROOT_TOKEN')
+          if (lookup('env', 'OPENBAO_CONFIG_BOOTSTRAP') | default(false, true) | bool)
+          else lookup('env', 'OPENBAO_CONFIG_TOKEN')) | default('', true) }}
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+    - name: Install and enable QEMU guest agent
+      ansible.builtin.apt:
+        name: qemu-guest-agent
+        state: present
+        update_cache: true
+    - ansible.builtin.service:
+        name: qemu-guest-agent
+        state: started
+        enabled: true
+    - name: Determine whether Forgejo HA is configured
+      ansible.builtin.set_fact:
+        forgejo_ha_prepare: >-
+          {{ forgejo_ha_backend in ['etcd', 'pacemaker'] }}
+    - name: Determine Forgejo HA startup gating
+      ansible.builtin.set_fact:
+        forgejo_ha_deferred: >-
+          {{ forgejo_ha_backend == 'pacemaker' }}
+        forgejo_managed_by_ha: >-
+          {{ forgejo_ha_backend in ['etcd', 'pacemaker'] }}
+    - name: Configure Pacemaker HA during HA synchronization
+      ansible.builtin.include_role:
+        name: pacemaker_ha
+      when:
+        - forgejo_ha_prepare | bool
+        - forgejo_ha_backend == 'pacemaker'
+        - forgejo_ha_sync | bool
+  roles:
+    - docker_host
+    - role: etcd_ha
+      when:
+        - forgejo_ha_prepare | bool
+        - forgejo_ha_backend == 'etcd'
+    - role: forgejo_ha
+      when: forgejo_ha_prepare | bool
+    - forgejo_app
+    - monitoring_agent
+    - logging_agent
+  post_tasks:
+    - name: Start Forgejo etcd HA controller after application configuration
+      ansible.builtin.systemd:
+        name: "{{ etcd_ha_controller_unit }}"
+        state: started
+        enabled: true
+        daemon_reload: true
+      when:
+        - forgejo_ha_prepare | bool
+        - forgejo_ha_backend == 'etcd'
+    - name: Configure Forgejo Actions auth in OpenBao after Forgejo is ready
+      ansible.builtin.include_tasks: ../../../shared/ansible/tasks/configure_forgejo_openbao_auth.yml
+      when: forgejo_openbao_configure_actions_auth | bool

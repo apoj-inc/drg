@@ -1,0 +1,13 @@
+list_repositories_tags:
+  stage: {{ job.stage }}
+  environment:
+    name: $ENVIRONMENT/docker
+  inputs:
+    repo:
+      description: 'Repo to list tags'
+      default: ''
+  script:
+    - curl -sS --proxy "${HTTPS_PROXY:?HTTPS_PROXY is required}" "https://$DOCKERHUB_URL/v2/$(job.inputs.repo)/tags/list"
+  {% if job.when %}
+  when: "{{ job.when }}"
+  {% endif %}

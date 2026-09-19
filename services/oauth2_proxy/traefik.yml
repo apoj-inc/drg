@@ -1,0 +1,13 @@
+---
+http:
+  - name: oauth2-proxy
+    host: "oauth2.{{ lookup('env', 'TRAEFIK_DOMAIN') | default('example.test', true) }}"
+    backend_port: 4180
+    health_check:
+      path: /ping
+      scheme: http
+      interval: 10s
+      timeout: 3s
+    middlewares:
+      - secure-headers
+      - rate-limit

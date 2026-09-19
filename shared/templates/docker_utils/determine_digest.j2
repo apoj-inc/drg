@@ -1,0 +1,18 @@
+determine_digest:
+  stage: {{ job.stage }}
+  environment:
+    name: $ENVIRONMENT/docker
+  inputs:
+    repo:
+      default: ''
+    tag:
+      default: ''
+  script:
+    - "curl -sS --proxy \"${HTTPS_PROXY:?HTTPS_PROXY is required}\" -H 'Accept:
+     application/vnd.docker.distribution.manifest.v2+json'
+     -o /dev/null -w '%header{Docker-Content-Digest}'
+     https://$DOCKERHUB_URL/v2/$(job.inputs.repo)\
+     /manifests/$(job.inputs.tag)"
+  {% if job.when %}
+  when: "{{ job.when }}"
+  {% endif %}

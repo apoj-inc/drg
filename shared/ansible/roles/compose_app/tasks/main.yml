@@ -1,0 +1,43 @@
+---
+- name: Install compose app prerequisites
+  ansible.builtin.import_tasks: install.yml
+  tags:
+    - install
+    - prepare
+
+- name: Configure compose app
+  ansible.builtin.import_tasks: configure.yml
+  tags:
+    - configure
+
+- name: Validate compose app configuration
+  ansible.builtin.import_tasks: validate.yml
+  tags:
+    - configure
+    - validate
+
+- name: Pull compose images
+  ansible.builtin.import_tasks: pull.yml
+  tags:
+    - pull
+
+- name: Stop compose app before deploy
+  community.docker.docker_compose_v2:
+    project_src: "{{ compose_app_root }}"
+    files:
+      - "{{ compose_app_compose_file | basename }}"
+    state: absent
+    remove_orphans: true
+  when: compose_app_down_before_deploy | bool
+  tags:
+    - deploy
+
+- name: Deploy compose app
+  ansible.builtin.import_tasks: deploy.yml
+  tags:
+    - deploy
+
+- name: Healthcheck compose app
+  ansible.builtin.import_tasks: healthcheck.yml
+  tags:
+    - healthcheck

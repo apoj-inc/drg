@@ -1,0 +1,107 @@
+{
+  "uid": "identity-ha",
+  "title": "Identity HA",
+  "tags": ["freeipa", "keycloak", "oauth2-proxy", "ha"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "replica",
+        "label": "Replica",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": "label_values({job=~\"keycloak|oauth2-proxy|freeipa-http\"}, instance)",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": {"text": "All", "value": ["$__all"]},
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Healthy identity targets",
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "(sum(up{job=~\"keycloak|oauth2-proxy\",instance=~\"$replica\"}) or vector(0)) + (sum(max by (exported_service, url) (traefik_service_server_up{exported_service=~\"freeipa.*\"})) or vector(0))"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "textMode": "value"},
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Traefik healthy backends",
+      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(max by (exported_service, url) (traefik_service_server_up{exported_service=~\".*(keycloak|oauth2|freeipa).*\"})) or vector(0)"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "textMode": "value"},
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Replica availability",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "up{job=\"keycloak\",instance=~\"$replica\"}", "legendFormat": "keycloak {{instance}}"},
+        {"refId": "B", "expr": "up{job=\"oauth2-proxy\",instance=~\"$replica\"}", "legendFormat": "oauth2 {{instance}}"},
+        {"refId": "C", "expr": "probe_success{job=\"freeipa-http\",service=\"freeipa\",instance=~\"$replica\"}", "legendFormat": "freeipa probe {{instance}}"},
+        {"refId": "D", "expr": "max by (url) (traefik_service_server_up{exported_service=~\"freeipa.*\"})", "legendFormat": "freeipa {{url}}"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1, "unit": "short"}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Keycloak request rate",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (method, outcome) (rate(http_server_requests_seconds_count{job=\"keycloak\"}[5m]))", "legendFormat": "{{method}} / {{outcome}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "OAuth2 Proxy request rate",
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (code) (rate(oauth2_proxy_response_duration_seconds_count{job=\"oauth2-proxy\"}[5m]))", "legendFormat": "HTTP {{code}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Traefik identity route errors",
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (exported_service, code) (rate(traefik_service_requests_total{exported_service=~\".*(keycloak|oauth2|freeipa).*\",code=~\"4..|5..\"}[5m]))", "legendFormat": "{{exported_service}} {{code}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "FreeIPA health probes and backends",
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 23},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "probe_success{job=~\"freeipa-http|freeipa-ldap|freeipa-ldaps|freeipa-kerberos\"}", "legendFormat": "probe {{job}} {{instance}}"},
+        {"refId": "B", "expr": "max by (exported_service, url) (traefik_service_server_up{exported_service=~\"freeipa.*\"})", "legendFormat": "backend {{url}}"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1, "unit": "short"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}}
+    }
+  ]
+}

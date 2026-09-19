@@ -1,0 +1,5 @@
+---
+name: pki-requester
+rules:
+  - path: pki/issue/agent-client
+    capabilities: [update]

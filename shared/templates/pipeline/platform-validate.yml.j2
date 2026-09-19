@@ -1,0 +1,14 @@
+platform:openstack:example:validate:
+  stage: platform_validate
+  extends: .platform_configure
+{% set openbao_secret_job = "platform" %}
+{% include "openbao-secrets.yml.j2" %}
+  variables:
+    OPENSTACK_PLATFORM_PHASE: validate
+{% include "openbao-variables.yml.j2" %}
+  script:
+    - python3 shared/scripts/run_platform.py --phase validate
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

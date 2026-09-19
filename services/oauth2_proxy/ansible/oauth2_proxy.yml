@@ -1,0 +1,47 @@
+---
+- name: Deploy OAuth2 Proxy
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('oauth2-proxy', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    oauth2_proxy_image: "{{ 'quay.io/oauth2-proxy/oauth2-proxy:' ~ oauth2_proxy.image_tag }}"
+    oauth2_proxy_listen_address: "{{ oauth2_proxy.listen_address }}"
+    oauth2_proxy_http_port: "{{ oauth2_proxy.http_port }}"
+    oauth2_proxy_metrics_port: "{{ oauth2_proxy.metrics_port | default(44180) }}"
+    oauth2_proxy_hostname: "{{ oauth2_proxy.hostname }}"
+    oauth2_proxy_issuer_url: "{{ oauth2_proxy.issuer_url }}"
+    oauth2_proxy_keycloak_hostname: "{{ oauth2_proxy.issuer_url | regex_replace('^https?://', '') | regex_replace('/.*$', '') }}"
+    oauth2_proxy_keycloak_ip: ""
+    oauth2_proxy_keycloak_direct_url: ""
+    oauth2_proxy_skip_oidc_discovery: false
+    oauth2_proxy_client_id: "{{ oauth2_proxy.client_id }}"
+    oauth2_proxy_client_secret: "{{ lookup('env', 'KEYCLOAK_OAUTH2_PROXY_CLIENT_SECRET') }}"
+    oauth2_proxy_cookie_secret: "{{ lookup('env', 'OAUTH2_PROXY_COOKIE_SECRET') }}"
+    oauth2_proxy_cookie_domain: "{{ oauth2_proxy.cookie_domain }}"
+    oauth2_proxy_cookie_name: "{{ oauth2_proxy.cookie_name }}"
+    oauth2_proxy_cookie_expire: "{{ oauth2_proxy.cookie_expire }}"
+    oauth2_proxy_cookie_refresh: "{{ oauth2_proxy.cookie_refresh }}"
+    oauth2_proxy_cookie_samesite: "{{ oauth2_proxy.cookie_samesite }}"
+    oauth2_proxy_redirect_url: "{{ oauth2_proxy.redirect_url }}"
+    oauth2_proxy_upstream: "{{ oauth2_proxy.upstream }}"
+    oauth2_proxy_email_domains: "{{ oauth2_proxy.email_domains }}"
+    oauth2_proxy_whitelist_domains: "{{ oauth2_proxy.whitelist_domains }}"
+    oauth2_proxy_insecure_oidc_allow_unverified_email: "{{ oauth2_proxy.insecure_oidc_allow_unverified_email }}"
+    oauth2_proxy_scope: "{{ oauth2_proxy.scope }}"
+    oauth2_proxy_trusted_proxy_ips: "{{ oauth2_proxy.trusted_proxy_ips }}"
+    oauth2_proxy_set_xauthrequest: "{{ oauth2_proxy.set_xauthrequest }}"
+    oauth2_proxy_pass_authorization_header: "{{ oauth2_proxy.pass_authorization_header }}"
+    oauth2_proxy_pass_access_token: "{{ oauth2_proxy.pass_access_token }}"
+    oauth2_proxy_set_authorization_header: "{{ oauth2_proxy.set_authorization_header }}"
+    oauth2_proxy_reverse_proxy: "{{ oauth2_proxy.reverse_proxy }}"
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - oauth2_proxy_app
+    - logging_agent

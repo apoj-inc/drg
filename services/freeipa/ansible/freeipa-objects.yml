@@ -1,0 +1,33 @@
+---
+- name: Reconcile repository-owned FreeIPA objects
+  hosts: "{{ lookup('env', 'ANSIBLE_LIMIT') | default('freeipa-node-a.example.test', true) }}"
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../config.yaml
+
+  vars:
+    freeipa_admin_password: "{{ lookup('env', 'FREEIPA_ADMIN_PASSWORD') }}"
+    freeipa_iac_identity_files:
+      - "{{ playbook_dir }}/../identity/groups.yaml"
+      - "{{ playbook_dir }}/../identity/hostgroups.yaml"
+      - "{{ playbook_dir }}/../identity/users.yaml"
+      - "{{ playbook_dir }}/../identity/service_users.yaml"
+      - "{{ playbook_dir }}/../identity/roles.yaml"
+      - "{{ playbook_dir }}/../identity/hosts.yaml"
+      - "{{ playbook_dir }}/../identity/services.yaml"
+      - "{{ playbook_dir }}/../identity/hbac.yaml"
+      - "{{ playbook_dir }}/../identity/sudo.yaml"
+    freeipa_iac_root: "{{ freeipa.iac.root }}"
+    freeipa_iac_profiles_dir: "{{ freeipa.iac.profiles_dir }}"
+    freeipa_iac_identity_dir: "{{ freeipa.iac.identity_dir }}"
+    freeipa_iac_backup_dir: "{{ freeipa.iac.backup_dir }}"
+    freeipa_is_primary: true
+
+  pre_tasks:
+    - ansible.builtin.import_tasks: ../../../shared/ansible/tasks/bootstrap_python.yml
+
+  roles:
+    - role: freeipa_app
+      tasks_from: iac.yml

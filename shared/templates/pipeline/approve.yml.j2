@@ -1,0 +1,31 @@
+approve:{{ job.job_id }}:
+  stage: {{ "approve_" ~ (job.deployment_contour | lower) if job.deployment_contour else "approve" }}
+{% if job.rollout_target_tag %}
+  tags:
+    - {{ job.rollout_target_tag }}
+{% endif %}
+  environment:
+    name: "{{ deploy_environment }}/{{ job.environment_name }}"
+    action: prepare
+  script:
+{% if job.terraform_needed %}
+    - cd "services/{{ job.service }}/terraform"
+    - cat tfplan.txt
+{% endif %}
+    - echo "Approved {{ job.job_id }} deployment."
+  when: manual
+  allow_failure: false
+{% if job.platform_needs or job.terraform_needed %}
+  needs:
+{% for dependency in job.platform_needs %}
+    - job: {{ dependency }}
+{% endfor %}
+{% if job.terraform_needed %}
+    - job: plan:{{ job.job_id }}
+      artifacts: true
+{% endif %}
+{% endif %}
+  rules:
+{% for source in child_pipeline_sources %}
+    - if: '$CI_PIPELINE_SOURCE == "{{ source }}"'
+{% endfor %}

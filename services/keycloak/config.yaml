@@ -1,0 +1,157 @@
+---
+service:
+  name: keycloak
+  topology: replicated
+  description: Keycloak identity-provider service federated with FreeIPA.
+  tags: [opentofu, keycloak, traefik-managed-route, identity]
+
+startup:
+  order: 60
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+rollout:
+  by_contour: true
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1031
+      B:
+        start: 1041
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+
+compute:
+  cpu_cores: 4
+  memory_mb: 4096
+  swap_mb: 2048
+  disk_gb: 10
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: identity
+      dns_name_pattern: keycloak-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: keycloak.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+keycloak:
+  image_tag: 26.7.0
+  listen_address: 0.0.0.0
+  http_port: 8080
+  hostname: https://keycloak.example.test
+  realm: drg
+  display_name: DRG
+  admin_username: admin
+  postgresql:
+    host: postgresql.example.test
+    port: 5432
+    database: keycloak
+    username: keycloak
+  proxy:
+    headers: xforwarded
+    trusted_addresses: 198.51.100.0/24,192.0.2.0/24,198.51.100.0/24
+    x509_lookup_provider:
+      enabled: true
+      provider: traefik
+      certificate_chain_length: 10
+  freeipa:
+    enabled: true
+    connection_urls:
+      - ldaps://freeipa-node-a.example.test:636
+      - ldaps://freeipa-node-b.example.test:636
+    ca_url: https://freeipa-node-a.example.test/ipa/config/ca.crt
+    users_dn: cn=users,cn=accounts,dc=example,dc=test
+    groups_dn: cn=groups,cn=accounts,dc=example,dc=test
+    bind_dn: uid=keycloak-bind,cn=users,cn=accounts,dc=example,dc=test
+    username_ldap_attribute: uid
+    rdn_ldap_attribute: uid
+    uuid_ldap_attribute: ipaUniqueID
+    user_object_classes: inetOrgPerson, organizationalPerson
+    edit_mode: READ_ONLY
+    import_users: true
+    full_sync_on_deploy: true
+    master_admins:
+      enabled: true
+      provider_name: freeipa-master-admin
+      ldap_group: admins
+      keycloak_group_parent: freeipa
+    federation_reconciliation:
+      enabled: true
+      remove_unmanaged: true
+      application_providers:
+        - freeipa
+      master_providers:
+        - freeipa-master-admin
+  clients:
+    - client_id: oauth2-proxy
+      name: OAuth2 Proxy
+      secret_env: KEYCLOAK_OAUTH2_PROXY_CLIENT_SECRET
+      secret_var: keycloak_oauth2_proxy_client_secret
+      redirect_uris:
+        - https://oauth2.example.test/oauth2/callback
+      web_origins:
+        - https://oauth2.example.test
+    - client_id: gitlab
+      name: GitLab (Keycloak)
+      secret_env: KEYCLOAK_GITLAB_CLIENT_SECRET
+      secret_var: keycloak_gitlab_client_secret
+      redirect_uris:
+        - https://git.example.test/users/auth/keycloak/callback
+      web_origins:
+        - https://git.example.test
+    - client_id: netbox
+      name: NetBox (Keycloak)
+      secret_env: KEYCLOAK_NETBOX_CLIENT_SECRET
+      secret_var: keycloak_netbox_client_secret
+      redirect_uris:
+        - https://netbox.example.test/oauth/complete/oidc/
+      web_origins:
+        - https://netbox.example.test
+    - client_id: openbao
+      name: OpenBao (Keycloak)
+      secret_env: KEYCLOAK_OPENBAO_CLIENT_SECRET
+      secret_var: keycloak_openbao_client_secret
+      redirect_uris:
+        - https://openbao.example.test/ui/vault/auth/oidc-keycloak/oidc/callback
+        - https://openbao.example.test/v1/auth/oidc-keycloak/oidc/callback
+        - http://localhost:8250/oidc/callback
+      web_origins:
+        - https://openbao.example.test
+
+secrets:
+  path: kv/services/keycloak
+  fields:
+    - keycloak_admin_password
+    - keycloak_postgresql_password
+    - keycloak_freeipa_bind_password
+    - keycloak_oauth2_proxy_client_secret
+    - keycloak_gitlab_client_secret
+    - keycloak_netbox_client_secret
+    - keycloak_openbao_client_secret
+
+freeipa_client:
+  hostgroups: [service-keycloak]

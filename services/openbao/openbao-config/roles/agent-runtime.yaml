@@ -1,0 +1,5 @@
+---
+auth_mount: cert
+name: agent-runtime
+policy: agent-runtime
+purpose: Reserved for a future OpenBao Agent runtime identity.

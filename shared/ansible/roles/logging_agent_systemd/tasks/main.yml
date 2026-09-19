@@ -1,0 +1,43 @@
+---
+- name: Validate systemd journal unit configuration
+  ansible.builtin.assert:
+    that:
+      - logging_agent_journal_units is sequence
+      - logging_agent_journal_units is not string
+    fail_msg: logging.journal_units must be a list of systemd unit basenames.
+
+- name: Reject unit names with a service suffix
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | length > 0
+      - not (item | regex_search('\\.service$'))
+    fail_msg: >-
+      journal unit {{ item | default('undefined') }} must omit the .service
+      suffix.
+  loop: "{{ logging_agent_journal_units }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Build complete systemd unit names
+  ansible.builtin.set_fact:
+    logging_agent_journal_unit_names: >-
+      {{ logging_agent_journal_units | map('regex_replace', '$', '.service') | list }}
+
+- name: Allow Alloy to read systemd journal
+  ansible.builtin.user:
+    name: alloy
+    groups:
+      - adm
+      - systemd-journal
+    append: true
+  notify: Restart Alloy
+
+- name: Render systemd Alloy module
+  ansible.builtin.template:
+    src: systemd.alloy.j2
+    dest: "{{ logging_agent_systemd_module_path }}"
+    owner: root
+    group: alloy
+    mode: "0640"
+  notify: Restart Alloy

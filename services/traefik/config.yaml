@@ -1,0 +1,106 @@
+---
+service:
+  name: traefik
+  topology: replicated
+  description: Highly available edge proxy service.
+  tags: [opentofu, traefik, traefik-managed-route]
+
+startup:
+  order: 30
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+            B: 1
+
+rollout:
+  by_contour: true
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A:
+        start: 1003
+      B:
+        start: 1013
+
+container:
+  template:
+    path: local:vztmpl
+    name: debian-13-standard_13.6-1_amd64.tar.zst
+  features:
+    nesting: true
+    keyctl: false
+    fuse: false
+
+compute:
+  cpu_cores: 2
+  memory_mb: 1024
+  swap_mb: 512
+  disk_gb: 10
+
+network:
+  interfaces:
+    - name: net0
+      network: management
+      mode: netbox
+      gateway: null
+      discover_gateway: false
+      role: ingress
+      dns_name_pattern: traefik-%{cluster}-%{contour}-%02d
+      ansible_primary: false
+    - name: net1
+      network: app
+      mode: netbox
+      gateway: 198.51.100.1
+      role: app
+      dns_name_pattern: traefik-app-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: traefik.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: static
+    static:
+      record_type: A
+      address: 198.51.100.3
+
+keepalived:
+  interface: auto
+  virtual_ip: 198.51.100.3/24
+  virtual_router_id: 51
+  primary_priority: 150
+  backup_priority: 100
+  advert_interval: 1
+
+traefik:
+  metrics:
+    enabled: true
+    entrypoint: metrics
+    listen_port: 8082
+  host_entries:
+    - address: 198.51.100.26
+      names:
+        - postgresql-node-b.example.test
+        - postgresql-node-b
+    - address: 198.51.100.23
+      names:
+        - postgresql-node-a.example.test
+        - postgresql-node-a
+secrets:
+  path: kv/services/traefik
+  fields:
+    - traefik_acme_email
+    - selectelv2_account_id
+    - selectelv2_project_id
+    - selectelv2_username
+    - selectelv2_password
+
+freeipa_client:
+  hostgroups: [service-traefik]

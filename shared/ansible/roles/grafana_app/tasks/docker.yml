@@ -1,0 +1,147 @@
+---
+- name: Gather distribution facts for Docker repository
+  ansible.builtin.setup:
+    gather_subset:
+      - min
+    filter:
+      - ansible_distribution_release
+
+- name: Install Docker for Grafana
+  ansible.builtin.import_role:
+    name: docker_lxc
+
+- name: Ensure Grafana compose directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_compose_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install Grafana compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ grafana_compose_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Render Grafana monitoring environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ grafana_compose_dir }}/.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+
+- name: Render Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ grafana_compose_dir }}/prometheus.yml"
+    owner: root
+    group: "{{ grafana_prometheus_gid }}"
+    mode: '0640'
+  no_log: true
+  notify: Recreate Prometheus
+
+- name: Render Loki configuration
+  ansible.builtin.template:
+    src: loki.yml.j2
+    dest: "{{ grafana_compose_dir }}/loki.yml"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Recreate Loki
+
+- name: Render Blackbox exporter configuration
+  ansible.builtin.template:
+    src: blackbox.yml.j2
+    dest: "{{ grafana_compose_dir }}/blackbox.yml"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Render Proxmox exporter configuration
+  ansible.builtin.template:
+    src: pve.yml.j2
+    dest: "{{ grafana_compose_dir }}/pve.yml"
+    owner: root
+    group: "{{ grafana_pve_exporter_gid }}"
+    mode: '0640'
+  no_log: true
+  notify: Recreate Proxmox exporter
+
+- name: Install Grafana dashboards provisioning
+  ansible.builtin.copy:
+    src: "{{ grafana_dashboards_source_dir }}/"
+    dest: "{{ grafana_compose_dir }}/provisioning/dashboards/"
+    owner: root
+    group: root
+    mode: preserve
+
+- name: Install Grafana datasource provisioning
+  ansible.builtin.copy:
+    src: provisioning/datasources/
+    dest: "{{ grafana_compose_dir }}/provisioning/datasources/"
+    owner: root
+    group: root
+    mode: preserve
+  notify: Recreate Grafana container
+
+- name: Ensure Grafana alerting provisioning directory exists
+  ansible.builtin.file:
+    path: "{{ grafana_compose_dir }}/provisioning/alerting"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Render Grafana alerting provisioning
+  ansible.builtin.template:
+    src: "{{ grafana_alerting_source_file }}"
+    dest: "{{ grafana_compose_dir }}/provisioning/alerting/alerting.yml"
+    owner: root
+    group: root
+    mode: '0644'
+  no_log: true
+  notify: Recreate Grafana container
+
+- name: Install Prometheus snapshot script
+  ansible.builtin.template:
+    src: prometheus-snapshot.sh.j2
+    dest: /usr/local/sbin/grafana-prometheus-snapshot
+    owner: root
+    group: root
+    mode: '0700'
+  no_log: true
+  when: grafana_s3_endpoint | length > 0
+
+- name: Install Prometheus snapshot systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - grafana-prometheus-snapshot.service
+    - grafana-prometheus-snapshot.timer
+  when: grafana_s3_endpoint | length > 0
+  notify: Reload systemd
+
+- name: Enable Prometheus snapshot timer
+  ansible.builtin.systemd:
+    name: grafana-prometheus-snapshot.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: grafana_s3_endpoint | length > 0
+
+- name: Disable obsolete OpenBao metrics-token renewal timer
+  ansible.builtin.systemd:
+    name: grafana-openbao-token-renew.timer
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  failed_when: false

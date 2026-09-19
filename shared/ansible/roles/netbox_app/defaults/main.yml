@@ -1,0 +1,9 @@
+---
+netbox_compose_dir: /opt/netbox
+netbox_image_tag: "{{ 'latest' if (netbox_docker_version | default('release')) == 'release' else netbox_docker_version }}"
+netbox_base_image: "netboxcommunity/netbox:{{ netbox_image_tag }}"
+netbox_image: "local/netbox:{{ netbox_image_tag }}-dns"
+netbox_plugins:
+  - netbox_dns
+netbox_plugin_python_packages:
+  - netbox-plugin-dns

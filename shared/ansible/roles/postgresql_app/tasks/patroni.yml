@@ -1,0 +1,182 @@
+---
+- name: Ensure Patroni configuration directory exists
+  ansible.builtin.file:
+    path: /etc/patroni
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0750"
+
+- name: Ensure PostgreSQL data parent directory exists
+  ansible.builtin.file:
+    path: "{{ postgresql_data_dir | dirname }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0755"
+
+- name: Ensure an existing PostgreSQL data directory has a base configuration
+  ansible.builtin.copy:
+    src: "/usr/share/postgresql/{{ postgresql_version }}/postgresql.conf.sample"
+    dest: "{{ postgresql_data_dir }}/postgresql.conf"
+    remote_src: true
+    owner: postgres
+    group: postgres
+    mode: "0600"
+    force: false
+  when: postgresql_data_directory.stat.exists
+
+- name: Build Patroni pg_hba rules
+  ansible.builtin.set_fact:
+    postgresql_patroni_pg_hba:
+      - local   all             postgres                                peer
+      - local   all             all                                     peer
+      - host    all             all             127.0.0.1/32            scram-sha-256
+      - host    all             all             ::1/128                 scram-sha-256
+      - "host    replication     {{ postgresql_replication_user }}       127.0.0.1/32            scram-sha-256"
+      - "host    replication     {{ postgresql_replication_user }}       ::1/128                 scram-sha-256"
+
+- name: Add allowed networks to Patroni pg_hba rules
+  ansible.builtin.set_fact:
+    postgresql_patroni_pg_hba: >-
+      {{
+        postgresql_patroni_pg_hba + [
+          'host    all             all             ' ~ item ~ '              scram-sha-256',
+          'host    replication     ' ~ postgresql_replication_user ~ '       ' ~ item ~ '              scram-sha-256'
+        ]
+      }}
+  loop: "{{ postgresql_allowed_cidrs }}"
+
+- name: Write Patroni configuration
+  ansible.builtin.copy:
+    dest: /etc/patroni/config.yml
+    owner: postgres
+    group: postgres
+    mode: "0640"
+    content: |
+      ---
+      scope: {{ postgresql_patroni_scope | to_json }}
+      namespace: {{ postgresql_patroni_namespace | to_json }}
+      name: {{ postgresql_patroni_name | to_json }}
+
+      restapi:
+        listen: {{ (postgresql_patroni_restapi_listen_address ~ ':' ~ postgresql_patroni_restapi_port) | to_json }}
+        connect_address: {{ (postgresql_patroni_connect_address ~ ':' ~ postgresql_patroni_restapi_port) | to_json }}
+
+      etcd:
+        hosts: {{ postgresql_patroni_dcs_hosts | join(',') | to_json }}
+
+      bootstrap:
+        dcs:
+          ttl: {{ postgresql_patroni_ttl }}
+          loop_wait: {{ postgresql_patroni_loop_wait }}
+          retry_timeout: {{ postgresql_patroni_retry_timeout }}
+          maximum_lag_on_failover: {{ postgresql_patroni_maximum_lag_on_failover }}
+          failsafe_mode: {{ postgresql_patroni_failsafe_mode | bool | lower }}
+          postgresql:
+            use_pg_rewind: true
+            use_slots: true
+            parameters:
+              wal_level: replica
+              hot_standby: "on"
+              wal_log_hints: "on"
+              max_wal_senders: 10
+              max_replication_slots: 10
+              wal_keep_size: "512MB"
+        initdb:
+          - encoding: {{ postgresql_encoding }}
+          - locale: {{ postgresql_locale }}
+          - data-checksums
+        pg_hba: {{ postgresql_patroni_pg_hba | to_json }}
+
+      postgresql:
+        listen: {{ (postgresql_listen_address ~ ':' ~ postgresql_port) | to_json }}
+        connect_address: {{ (postgresql_patroni_connect_address ~ ':' ~ postgresql_port) | to_json }}
+        data_dir: {{ postgresql_data_dir | to_json }}
+        bin_dir: {{ postgresql_bin_dir | to_json }}
+        pgpass: {{ ((postgresql_data_dir | dirname) ~ '/.pgpass') | to_json }}
+        create_replica_methods:
+          - basebackup
+        basebackup:
+          checkpoint: fast
+        authentication:
+          superuser:
+            username: postgres
+            password: {{ postgresql_admin_password | to_json }}
+          replication:
+            username: {{ postgresql_replication_user | to_json }}
+            password: {{ postgresql_replication_password | to_json }}
+        parameters:
+          wal_level: replica
+          hot_standby: "on"
+          wal_log_hints: "on"
+          max_wal_senders: 10
+          max_replication_slots: 10
+          wal_keep_size: "512MB"
+          shared_preload_libraries: {{ postgresql_shared_preload_libraries | join(',') | to_json }}
+      {% for key, value in postgresql_global_config.items() %}
+          {{ key }}: {{ value | to_json }}
+      {% endfor %}
+        callbacks:
+          on_start: /usr/local/sbin/patroni-pgbouncer-role
+          on_restart: /usr/local/sbin/patroni-pgbouncer-role
+          on_role_change: /usr/local/sbin/patroni-pgbouncer-role
+        pg_hba: {{ postgresql_patroni_pg_hba | to_json }}
+      tags:
+        nofailover: false
+        noloadbalance: false
+        clonefrom: false
+        nosync: false
+  no_log: true
+  notify: Restart Patroni
+
+- name: Ensure standalone PostgreSQL service is stopped
+  ansible.builtin.service:
+    name: postgresql
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Ensure Patroni is enabled and running
+  ansible.builtin.service:
+    name: patroni
+    state: started
+    enabled: true
+
+- name: Apply Patroni configuration before health check
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Patroni-managed PostgreSQL
+  ansible.builtin.command:
+    argv:
+      - "{{ postgresql_bin_dir }}/pg_isready"
+      - --host
+      - 127.0.0.1
+      - --port
+      - "{{ postgresql_port | string }}"
+  register: postgresql_patroni_ready
+  changed_when: false
+  retries: 24
+  delay: 5
+  until: postgresql_patroni_ready.rc == 0
+
+- name: Check current Patroni role for PgBouncer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ postgresql_patroni_restapi_port }}/primary"
+    status_code:
+      - 200
+      - 503
+  register: postgresql_patroni_local_primary
+  failed_when: false
+  changed_when: false
+  when: postgresql_pgbouncer_enabled | bool
+
+- name: Apply current Patroni role to PgBouncer
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/patroni-pgbouncer-role
+      - refresh
+      - "{{ 'primary' if postgresql_patroni_local_primary.status | default(503) == 200 else 'replica' }}"
+      - "{{ postgresql_patroni_scope }}"
+  changed_when: false
+  when: postgresql_pgbouncer_enabled | bool

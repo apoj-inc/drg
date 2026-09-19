@@ -1,0 +1,196 @@
+---
+- name: Validate PostgreSQL local data disk settings
+  ansible.builtin.assert:
+    that:
+      - postgresql_data_disk_device is match('^/dev/[A-Za-z0-9._/-]+$')
+      - postgresql_data_disk_mountpoint is match('^/[^ ]*$')
+      - postgresql_data_disk_filesystem in ['ext4', 'xfs']
+    fail_msg: >-
+      PostgreSQL local data disk settings must define a device under /dev, an
+      absolute mountpoint, and filesystem ext4 or xfs.
+
+- name: Check PostgreSQL local data disk device
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_disk_device }}"
+  register: postgresql_data_disk_stat
+
+- name: Require the PostgreSQL local data disk device
+  ansible.builtin.assert:
+    that:
+      - postgresql_data_disk_stat.stat.exists
+      - postgresql_data_disk_stat.stat.isblk
+    fail_msg: >-
+      PostgreSQL data disk {{ postgresql_data_disk_device }} is missing or is
+      not a block device. The Proxmox data disk must be attached first.
+
+- name: Check whether the PostgreSQL data disk is already mounted
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --noheadings
+      - --output
+      - SOURCE,FSTYPE
+      - --target
+      - "{{ postgresql_data_disk_mountpoint }}"
+  register: postgresql_data_disk_mount
+  changed_when: false
+  failed_when: false
+
+- name: Check for an existing PostgreSQL cluster before mounting the data disk
+  ansible.builtin.stat:
+    path: "{{ postgresql_data_dir }}/PG_VERSION"
+  register: postgresql_data_disk_existing_cluster
+  when: postgresql_data_disk_mount.rc != 0
+
+- name: Refuse to hide an existing PostgreSQL cluster behind a new mount
+  ansible.builtin.assert:
+    that:
+      - not postgresql_data_disk_existing_cluster.stat.exists
+    fail_msg: >-
+      {{ postgresql_data_dir }} already contains PostgreSQL data on the boot
+      disk. Stop and migrate that cluster to {{ postgresql_data_disk_device }}
+      before enabling the local data-disk mount.
+  when: postgresql_data_disk_mount.rc != 0
+
+- name: Detect the existing PostgreSQL data disk filesystem
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - --output
+      - value
+      - --match-tag
+      - TYPE
+      - "{{ postgresql_data_disk_device }}"
+  register: postgresql_data_disk_filesystem_probe
+  changed_when: false
+  failed_when: postgresql_data_disk_filesystem_probe.rc not in [0, 2]
+  when: postgresql_data_disk_mount.rc != 0
+
+- name: Refuse to use an unsupported mounted PostgreSQL data disk filesystem
+  ansible.builtin.assert:
+    that:
+      - postgresql_data_disk_mount.stdout.split() | length >= 2
+      - postgresql_data_disk_mount.stdout.split()[1] in ['ext4', 'xfs']
+    fail_msg: >-
+      {{ postgresql_data_disk_mountpoint }} is already mounted from
+      {{ postgresql_data_disk_mount.stdout.split()[0] | default('an unknown source') }}
+      with an unsupported filesystem. It will not be reformatted automatically.
+  when: postgresql_data_disk_mount.rc == 0
+
+- name: Refuse to mount an unsupported PostgreSQL data disk filesystem
+  ansible.builtin.assert:
+    that:
+      - postgresql_data_disk_filesystem_probe.stdout | trim in ['ext4', 'xfs']
+    fail_msg: >-
+      {{ postgresql_data_disk_device }} already has a filesystem other than
+      ext4 or xfs. It will not be reformatted automatically; migrate or wipe it
+      explicitly before running this playbook.
+  when:
+    - postgresql_data_disk_mount.rc != 0
+    - postgresql_data_disk_filesystem_probe.rc == 0
+
+- name: Select the PostgreSQL data disk filesystem
+  ansible.builtin.set_fact:
+    postgresql_data_disk_effective_filesystem: >-
+      {{
+        (postgresql_data_disk_mount.stdout.split()[1])
+        if postgresql_data_disk_mount.rc == 0
+        else (postgresql_data_disk_filesystem_probe.stdout | trim)
+        if postgresql_data_disk_filesystem_probe.rc == 0
+        else postgresql_data_disk_filesystem
+      }}
+
+- name: Report detected PostgreSQL data disk filesystem
+  ansible.builtin.debug:
+    msg: >-
+      {{ postgresql_data_disk_device }} already contains
+      {{ postgresql_data_disk_effective_filesystem }}; preserving it instead of
+      formatting it as {{ postgresql_data_disk_filesystem }}.
+  when:
+    - postgresql_data_disk_mount.rc != 0
+    - postgresql_data_disk_filesystem_probe.rc == 0
+    - postgresql_data_disk_effective_filesystem != postgresql_data_disk_filesystem
+
+- name: Create the PostgreSQL data disk filesystem
+  ansible.builtin.command:
+    argv:
+      - mkfs
+      - -t
+      - "{{ postgresql_data_disk_effective_filesystem }}"
+      - "{{ postgresql_data_disk_device }}"
+  when:
+    - postgresql_data_disk_mount.rc != 0
+    - postgresql_data_disk_filesystem_probe.rc == 2
+
+- name: Read the PostgreSQL data disk UUID
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - --output
+      - value
+      - --match-tag
+      - UUID
+      - "{{ postgresql_data_disk_device }}"
+  register: postgresql_data_disk_uuid
+  changed_when: false
+  when: postgresql_data_disk_mount.rc != 0
+  retries: 5
+  delay: 1
+  until: postgresql_data_disk_uuid.rc == 0 and postgresql_data_disk_uuid.stdout | trim | length > 0
+
+- name: Ensure the PostgreSQL data disk mountpoint exists
+  ansible.builtin.file:
+    path: "{{ postgresql_data_disk_mountpoint }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mount the PostgreSQL data disk
+  ansible.posix.mount:
+    path: "{{ postgresql_data_disk_mountpoint }}"
+    src: "/dev/disk/by-uuid/{{ postgresql_data_disk_uuid.stdout | trim }}"
+    fstype: "{{ postgresql_data_disk_effective_filesystem }}"
+    opts: defaults
+    state: mounted
+  when: postgresql_data_disk_mount.rc != 0
+
+- name: Ensure PostgreSQL service drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/postgresql.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Ensure PostgreSQL waits for its local data disk
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/postgresql.service.d/10-data-disk.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      RequiresMountsFor={{ postgresql_data_dir }}
+  notify: Reload systemd
+
+- name: Ensure Patroni service drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/patroni.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: postgresql_patroni_enabled | bool
+
+- name: Ensure Patroni waits for its local data disk
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/patroni.service.d/10-data-disk.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      RequiresMountsFor={{ postgresql_data_dir }}
+  when: postgresql_patroni_enabled | bool
+  notify: Reload systemd

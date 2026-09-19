@@ -1,0 +1,187 @@
+{
+    "editable": false,
+    "panels": [
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 0,
+                "y": 0
+            },
+            "id": 1,
+            "targets": [
+                {
+                    "expr": "vault_core_unsealed",
+                    "refId": "A"
+                }
+            ],
+            "title": "Unsealed",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 6,
+                "y": 0
+            },
+            "id": 2,
+            "targets": [
+                {
+                    "expr": "sum(vault_core_active)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Active nodes",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 12,
+                "y": 0
+            },
+            "id": 3,
+            "targets": [
+                {
+                    "expr": "sum(vault_core_in_flight_requests)",
+                    "refId": "A"
+                }
+            ],
+            "title": "In-flight requests",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 6,
+                "x": 18,
+                "y": 0
+            },
+            "id": 4,
+            "targets": [
+                {
+                    "expr": "sum(vault_expire_num_leases)",
+                    "refId": "A"
+                }
+            ],
+            "title": "Active leases",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 6
+            },
+            "id": 5,
+            "targets": [
+                {
+                    "expr": "sum(rate(vault_cache_hit[5m])) / (sum(rate(vault_cache_hit[5m])) + sum(rate(vault_cache_miss[5m])))",
+                    "refId": "A"
+                }
+            ],
+            "title": "Cache hit ratio",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 6
+            },
+            "id": 6,
+            "targets": [
+                {
+                    "expr": "vault_expire_num_leases",
+                    "legendFormat": "active leases",
+                    "refId": "A"
+                },
+                {
+                    "expr": "sum(vault_rollback_job_manager_queue_length)",
+                    "legendFormat": "rollback queue",
+                    "refId": "B"
+                }
+            ],
+            "title": "Active leases and rollback queue",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 14
+            },
+            "id": 7,
+            "targets": [
+                {
+                    "expr": "sum by(router,code) (rate(traefik_router_requests_total{router=~\".*openbao.*\"}[5m]))",
+                    "legendFormat": "{{router}} {{code}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik requests by route/code",
+            "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 14
+            },
+            "id": 8,
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by(le,router) (rate(traefik_router_request_duration_seconds_bucket{router=~\".*openbao.*\"}[5m])))",
+                    "legendFormat": "{{router}}",
+                    "refId": "A"
+                }
+            ],
+            "title": "Traefik p95 latency",
+            "type": "timeseries"
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "tags": [
+        "openbao",
+        "vault",
+        "traefik"
+    ],
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "title": "OpenBao",
+    "uid": "openbao",
+    "version": 1
+}

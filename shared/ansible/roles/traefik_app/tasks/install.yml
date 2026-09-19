@@ -1,0 +1,29 @@
+---
+- name: Install Docker
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure Traefik directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ traefik_compose_dir }}"
+      mode: "0755"
+    - path: "{{ traefik_compose_dir }}/config"
+      mode: "0755"
+    - path: "{{ traefik_compose_dir }}/config/apps"
+      mode: "0755"
+    - path: "{{ traefik_compose_dir }}/certs"
+      mode: "0700"
+    - path: "{{ traefik_compose_dir }}/logs"
+      mode: "0755"
+
+- name: Ensure ACME storage exists
+  ansible.builtin.file:
+    path: "{{ traefik_compose_dir }}/certs/acme.json"
+    state: touch
+    mode: "0600"
+    modification_time: preserve
+    access_time: preserve

@@ -1,0 +1,87 @@
+---
+service:
+  name: versitygw
+  topology: replicated
+  description: VersityGW S3 gateway with configurable local-disk or NFS storage.
+  tags: [opentofu, versitygw, traefik-managed-route]
+
+rollout:
+  by_contour: true
+
+startup:
+  order: 120
+
+placement:
+  clusters:
+    example-cluster:
+      nodes:
+        pve-node-a:
+          replicas_by_contour:
+            A: 1
+
+instance:
+  vm_id_ranges:
+    example-cluster:
+      A: {start: 1320}
+
+compute:
+  cpu_cores: 2
+  memory_mb: 4096
+  disk_gb: 20
+
+network:
+  interfaces:
+    - name: net0
+      network: app
+      mode: netbox
+      role: app
+      dns_name_pattern: versitygw-%{cluster}-%{contour}-%02d
+      ansible_primary: true
+
+dns:
+  canonical_name: s3.example.test
+  zone: example.test
+  ttl: 60
+  routing:
+    mode: ingress
+    ingress_service: traefik
+
+storage:
+  mode: local_disk
+  nfs:
+    server: 192.0.2.130
+    export: /mnt/backup_pool/versitygw-data
+    mountpoint: /srv/versitygw-data
+    mount_options: vers=4,hard,_netdev,noatime
+  local_disk:
+    device: /dev/sdb
+    mountpoint: /srv/versitygw-data
+    filesystem: ext4
+    mount_options: defaults,noatime
+    data_disk_gb: 120
+
+versitygw:
+  image: versity/versitygw
+  image_tag: v1.7.0
+  port: 7070
+  admin_port: 7071
+  data_dir: /srv/versitygw-data/objects
+  iam_dir: /srv/versitygw-data/iam
+  versioning_dir: /srv/versitygw-data/versioning
+  forgejo_bucket: forgejo
+  forgejo_access_key: forgejo
+  grafana_bucket: grafana-prometheus-snapshots
+  grafana_access_key: grafana
+
+secrets:
+  path: kv/services/versitygw
+  fields:
+    - versitygw_root_access_key
+    - versitygw_root_secret_key
+    - forgejo_s3_access_key
+    - forgejo_s3_secret_key
+    - grafana_s3_access_key
+    - grafana_s3_secret_key
+
+freeipa_client:
+  hostgroups: [service-versitygw]

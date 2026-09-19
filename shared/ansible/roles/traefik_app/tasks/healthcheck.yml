@@ -1,0 +1,16 @@
+---
+- name: Check Traefik container health
+  ansible.builtin.command: docker compose exec -T traefik traefik healthcheck --ping
+  args:
+    chdir: "{{ traefik_compose_dir }}"
+  changed_when: false
+
+- name: Check Traefik Prometheus metrics endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ traefik_metrics_listen_port }}/metrics"
+    status_code: 200
+    return_content: true
+  register: traefik_metrics_healthcheck
+  changed_when: false
+  failed_when: "'traefik_' not in traefik_metrics_healthcheck.content"
+  when: traefik_metrics_enabled | bool

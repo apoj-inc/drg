@@ -1,0 +1,13 @@
+---
+- name: Install Docker
+  ansible.builtin.import_role:
+    name: docker_host
+
+- name: Ensure Docker Hub cache directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ dockerhub_compose_dir }}"
+    - "{{ dockerhub_compose_dir }}/data"
